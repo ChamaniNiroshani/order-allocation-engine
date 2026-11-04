@@ -35,3 +35,6 @@ build/
 
 ### Junie (IntelliJ AI assistant) ###
 .junie/
+
+### GitHub Copilot app modernization (local tool files) ###
+.github/modernize/
