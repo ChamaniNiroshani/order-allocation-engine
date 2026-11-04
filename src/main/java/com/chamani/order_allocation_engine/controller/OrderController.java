@@ -2,7 +2,6 @@ package com.chamani.order_allocation_engine.controller;
 
 import com.chamani.order_allocation_engine.dto.CreateOrderRequest;
 import com.chamani.order_allocation_engine.dto.OrderResponse;
-import com.chamani.order_allocation_engine.exception.InsufficientInventoryException;
 import com.chamani.order_allocation_engine.model.Order;
 import com.chamani.order_allocation_engine.model.OrderStatus;
 import com.chamani.order_allocation_engine.service.AllocationService;
@@ -26,22 +25,23 @@ public class OrderController {
 
     @PostMapping
     public ResponseEntity<OrderResponse> createOrder(@Valid @RequestBody CreateOrderRequest request) {
-        try {
-            Order order = allocationService.allocate(
-                    request.getItemId(),
-                    request.getQuantityRequested(),
-                    request.getIdempotencyKey()
-            );
-            OrderResponse response = new OrderResponse(
-                    order.getOrderId(), order.getStatus(), order.getQuantityRequested(), null
-            );
-            return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        Order order = allocationService.allocate(
+                request.getItemId(),
+                request.getQuantityRequested(),
+                request.getIdempotencyKey()
+        );
 
-        } catch (InsufficientInventoryException ex) {
-            OrderResponse response = new OrderResponse(
-                    null, OrderStatus.FAILED, 0, ex.getMessage()
-            );
-            return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
-        }
+        boolean allocated = order.getStatus() == OrderStatus.ALLOCATED;
+        OrderResponse response = new OrderResponse(
+                order.getOrderId(),
+                order.getStatus(),
+                allocated ? order.getQuantityRequested() : 0,
+                order.getFailureReason()
+        );
+
+        // 201 = stock allocated, 409 = rejected (conflicts with current stock). A retry with the
+        // same idempotency key returns the stored order, so it gets the same status code again.
+        HttpStatus status = allocated ? HttpStatus.CREATED : HttpStatus.CONFLICT;
+        return ResponseEntity.status(status).body(response);
     }
 }

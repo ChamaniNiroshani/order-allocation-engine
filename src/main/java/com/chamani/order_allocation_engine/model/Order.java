@@ -30,6 +30,9 @@ public class Order {
     @Column(updatable = false)
     private Instant createdAt = Instant.now();
 
+    // Why the order was rejected. Stored so an idempotent retry returns the same answer.
+    private String failureReason;
+
     protected Order() {}
 
     public Order(UUID itemId, Integer quantityRequested, String idempotencyKey) {
@@ -45,4 +48,15 @@ public class Order {
     public void setStatus(OrderStatus status) { this.status = status; }
     public String getIdempotencyKey() { return idempotencyKey; }
     public Instant getCreatedAt() { return createdAt; }
+    public String getFailureReason() { return failureReason; }
+
+    public void markAllocated() {
+        this.status = OrderStatus.ALLOCATED;
+        this.failureReason = null;
+    }
+
+    public void markFailed(String reason) {
+        this.status = OrderStatus.FAILED;
+        this.failureReason = reason;
+    }
 }
