@@ -1,0 +1,35 @@
+name: PR title
+
+# Checks the PR title follows: <type>(<scope>): <summary>
+# Safe with pull_request_target because this job never checks out PR code.
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  check:
+    name: Conventional PR title
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            test
+            docs
+            chore
+            ci
+            refactor
+            perf
+          requireScope: false
+          # summary starts lowercase and has no trailing full stop
+          subjectPattern: ^[a-z].*[^.]$
+          subjectPatternError: |
+            The summary "{subject}" must start with a lowercase letter and must not end with a full stop.
+            Example: fix(allocation): persist FAILED orders when stock is insufficient
