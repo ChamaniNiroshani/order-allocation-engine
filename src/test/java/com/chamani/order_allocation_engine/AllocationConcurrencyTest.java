@@ -1,8 +1,9 @@
 package com.chamani.order_allocation_engine;
 
-import com.chamani.order_allocation_engine.exception.InsufficientInventoryException;
 import com.chamani.order_allocation_engine.model.InventoryItem;
 import com.chamani.order_allocation_engine.model.Order;
+import com.chamani.order_allocation_engine.model.OrderStatus;
+import com.chamani.order_allocation_engine.repository.OrderRepository;
 import com.chamani.order_allocation_engine.repository.InventoryItemRepository;
 import com.chamani.order_allocation_engine.service.AllocationService;
 import org.junit.jupiter.api.Test;
@@ -31,6 +32,9 @@ class AllocationConcurrencyTest {
     @Autowired
     private InventoryItemRepository inventoryItemRepository;
 
+    @Autowired
+    private OrderRepository orderRepository;
+
     @Test
     void concurrentRequests_neverOversell() throws Exception {
         final int stock = 100;
@@ -54,10 +58,14 @@ class AllocationConcurrencyTest {
                 ready.countDown();
                 try {
                     go.await();                        // release all threads at the same instant
-                    allocationService.allocate(itemId, quantityPerOrder, key);
-                    allocated.incrementAndGet();
-                } catch (InsufficientInventoryException e) {
-                    rejected.incrementAndGet();
+                    Order order = allocationService.allocate(itemId, quantityPerOrder, key);
+                    if (order.getStatus() == OrderStatus.ALLOCATED) {
+                        allocated.incrementAndGet();
+                    } else if (order.getStatus() == OrderStatus.FAILED) {
+                        rejected.incrementAndGet();
+                    } else {
+                        unexpected.incrementAndGet();
+                    }
                 } catch (Exception e) {
                     unexpected.incrementAndGet();
                     e.printStackTrace();
@@ -90,6 +98,41 @@ class AllocationConcurrencyTest {
 
         assertEquals(first.getOrderId(), second.getOrderId());
         assertEquals(90, inventoryItemRepository.findById(itemId).orElseThrow().getQuantityAvailable());
+    }
+
+    @Test
+    void insufficientStock_persistsFailedOrder_andLeavesStockUnchanged() {
+        UUID itemId = inventoryItemRepository.save(new InventoryItem(5)).getItemId();
+
+        Order order = allocationService.allocate(itemId, 10, "junit-fail-" + UUID.randomUUID());
+
+        assertEquals(OrderStatus.FAILED, order.getStatus());
+        assertNotNull(order.getOrderId(), "the FAILED order must be saved, not rolled back");
+
+        Order stored = orderRepository.findById(order.getOrderId()).orElseThrow();
+        assertEquals(OrderStatus.FAILED, stored.getStatus());
+        assertTrue(stored.getFailureReason().contains("only 5 available"));
+
+        assertEquals(5, inventoryItemRepository.findById(itemId).orElseThrow().getQuantityAvailable(),
+                "a rejected order must not touch stock");
+    }
+
+    @Test
+    void retryOfFailedKey_returnsSameFailedOrder_evenAfterRestock() {
+        InventoryItem item = inventoryItemRepository.save(new InventoryItem(5));
+        String key = "junit-fail-retry-" + UUID.randomUUID();
+
+        Order first = allocationService.allocate(item.getItemId(), 10, key);
+
+        // Restock so the same request would now succeed with a NEW key
+        item.setQuantityAvailable(100);
+        inventoryItemRepository.save(item);
+
+        Order retry = allocationService.allocate(item.getItemId(), 10, key);
+
+        assertEquals(first.getOrderId(), retry.getOrderId(), "an idempotency key replays its stored outcome");
+        assertEquals(OrderStatus.FAILED, retry.getStatus());
+        assertEquals(100, inventoryItemRepository.findById(item.getItemId()).orElseThrow().getQuantityAvailable());
     }
 
     @Test

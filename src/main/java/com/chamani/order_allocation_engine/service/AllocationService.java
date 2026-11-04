@@ -1,6 +1,5 @@
 package com.chamani.order_allocation_engine.service;
 
-import com.chamani.order_allocation_engine.exception.InsufficientInventoryException;
 import com.chamani.order_allocation_engine.model.Allocation;
 import com.chamani.order_allocation_engine.model.InventoryItem;
 import com.chamani.order_allocation_engine.model.Order;
@@ -28,6 +27,12 @@ public class AllocationService {
         this.allocationRepository = allocationRepository;
     }
 
+    /**
+     * Allocates stock for an order.
+     * Insufficient stock is a normal business outcome, not an error: the order is saved as FAILED
+     * (with a reason) and returned, so the transaction commits and the rejection is recorded.
+     * Throwing here would roll the whole transaction back and the FAILED order would vanish.
+     */
     @Transactional
     public Order allocate(UUID itemId, Integer quantityRequested, String idempotencyKey) {
 
@@ -43,9 +48,8 @@ public class AllocationService {
         Order order = new Order(itemId, quantityRequested, idempotencyKey);
 
         if (item.getQuantityAvailable() < quantityRequested) {
-            order.setStatus(OrderStatus.FAILED);
-            orderRepository.save(order);
-            throw new InsufficientInventoryException(item.getQuantityAvailable());
+            order.markFailed("Insufficient inventory: only " + item.getQuantityAvailable() + " available");
+            return orderRepository.save(order);
         }
 
         // Decrement inventory
@@ -53,7 +57,7 @@ public class AllocationService {
         inventoryItemRepository.save(item);
 
         // Save the order first so it has a generated orderId
-        order.setStatus(OrderStatus.ALLOCATED);
+        order.markAllocated();
         Order savedOrder = orderRepository.save(order);
 
         // Record the allocation against the saved order's id
