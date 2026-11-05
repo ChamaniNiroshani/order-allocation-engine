@@ -4,7 +4,7 @@ import com.chamani.order_allocation_engine.dto.CreateOrderRequest;
 import com.chamani.order_allocation_engine.dto.OrderResponse;
 import com.chamani.order_allocation_engine.model.Order;
 import com.chamani.order_allocation_engine.model.OrderStatus;
-import com.chamani.order_allocation_engine.service.AllocationService;
+import com.chamani.order_allocation_engine.service.OrderAllocationFacade;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -17,15 +17,15 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/orders")
 public class OrderController {
 
-    private final AllocationService allocationService;
+    private final OrderAllocationFacade allocationFacade;
 
-    public OrderController(AllocationService allocationService) {
-        this.allocationService = allocationService;
+    public OrderController(OrderAllocationFacade allocationFacade) {
+        this.allocationFacade = allocationFacade;
     }
 
     @PostMapping
     public ResponseEntity<OrderResponse> createOrder(@Valid @RequestBody CreateOrderRequest request) {
-        Order order = allocationService.allocate(
+        Order order = allocationFacade.allocate(
                 request.getItemId(),
                 request.getQuantityRequested(),
                 request.getIdempotencyKey()

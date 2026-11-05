@@ -6,12 +6,14 @@ import com.chamani.order_allocation_engine.model.OrderStatus;
 import com.chamani.order_allocation_engine.repository.OrderRepository;
 import com.chamani.order_allocation_engine.repository.InventoryItemRepository;
 import com.chamani.order_allocation_engine.service.AllocationService;
+import com.chamani.order_allocation_engine.service.OrderAllocationFacade;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -28,6 +30,9 @@ class AllocationConcurrencyTest {
 
     @Autowired
     private AllocationService allocationService;
+
+    @Autowired
+    private OrderAllocationFacade allocationFacade;
 
     @Autowired
     private InventoryItemRepository inventoryItemRepository;
@@ -86,6 +91,93 @@ class AllocationConcurrencyTest {
         assertEquals(stock / quantityPerOrder, allocated.get(), "exactly 10 orders should be allocated");
         assertEquals(requests - allocated.get(), rejected.get(), "all other requests should be rejected for insufficient stock");
         assertEquals(0, remaining, "stock must be fully consumed and never negative");
+    }
+
+    @Test
+    void sameKey_tenConcurrentThreads_createOneOrder() throws Exception {
+        final int threads = 10;
+        UUID itemId = inventoryItemRepository.save(new InventoryItem(100)).getItemId();
+        final String key = "junit-same-key-" + UUID.randomUUID();
+
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CountDownLatch ready = new CountDownLatch(threads);
+        CountDownLatch go = new CountDownLatch(1);
+
+        AtomicInteger errors = new AtomicInteger();
+        Set<UUID> orderIds = ConcurrentHashMap.newKeySet();
+
+        List<Future<?>> futures = new ArrayList<>();
+        for (int i = 0; i < threads; i++) {
+            futures.add(pool.submit(() -> {
+                ready.countDown();
+                try {
+                    go.await();                        // release all threads at the same instant
+                    Order order = allocationFacade.allocate(itemId, 10, key);
+                    orderIds.add(order.getOrderId());
+                } catch (Exception e) {
+                    errors.incrementAndGet();
+                    e.printStackTrace();
+                }
+            }));
+        }
+
+        assertTrue(ready.await(10, TimeUnit.SECONDS), "threads did not start in time");
+        go.countDown();
+        for (Future<?> f : futures) {
+            f.get(30, TimeUnit.SECONDS);
+        }
+        pool.shutdown();
+
+        assertEquals(0, errors.get(), "no retry may fail");
+        assertEquals(1, orderIds.size(), "all retries must return the same order");
+        assertTrue(orderRepository.findByIdempotencyKey(key).isPresent());
+        assertEquals(90, inventoryItemRepository.findById(itemId).orElseThrow().getQuantityAvailable());
+    }
+
+    @Test
+    void sameKey_twoDifferentItems_uniqueConstraintSettlesIt() throws Exception {
+        final int threads = 10;
+        final int total = 200;
+        UUID itemA = inventoryItemRepository.save(new InventoryItem(100)).getItemId();
+        UUID itemB = inventoryItemRepository.save(new InventoryItem(100)).getItemId();
+        final String key = "junit-same-key-2items-" + UUID.randomUUID();
+
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CountDownLatch ready = new CountDownLatch(threads);
+        CountDownLatch go = new CountDownLatch(1);
+
+        AtomicInteger errors = new AtomicInteger();
+        Set<UUID> orderIds = ConcurrentHashMap.newKeySet();
+
+        List<Future<?>> futures = new ArrayList<>();
+        for (int i = 0; i < threads; i++) {
+            final UUID itemId = (i % 2 == 0) ? itemA : itemB;   // different row locks: only the unique constraint settles it
+            futures.add(pool.submit(() -> {
+                ready.countDown();
+                try {
+                    go.await();
+                    Order order = allocationFacade.allocate(itemId, 10, key);
+                    orderIds.add(order.getOrderId());
+                } catch (Exception e) {
+                    errors.incrementAndGet();
+                    e.printStackTrace();
+                }
+            }));
+        }
+
+        assertTrue(ready.await(10, TimeUnit.SECONDS), "threads did not start in time");
+        go.countDown();
+        for (Future<?> f : futures) {
+            f.get(30, TimeUnit.SECONDS);
+        }
+        pool.shutdown();
+
+        int remainingA = inventoryItemRepository.findById(itemA).orElseThrow().getQuantityAvailable();
+        int remainingB = inventoryItemRepository.findById(itemB).orElseThrow().getQuantityAvailable();
+
+        assertEquals(0, errors.get(), "no retry may fail");
+        assertEquals(1, orderIds.size(), "all retries must return the same order");
+        assertEquals(total - 10, remainingA + remainingB, "stock must be deducted exactly once");
     }
 
     @Test
