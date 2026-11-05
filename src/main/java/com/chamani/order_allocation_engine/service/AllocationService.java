@@ -36,14 +36,16 @@ public class AllocationService {
     @Transactional
     public Order allocate(UUID itemId, Integer quantityRequested, String idempotencyKey) {
 
-        // Idempotency check first — never allocate twice for the same key
+        InventoryItem item = inventoryItemRepository.findByIdForUpdate(itemId)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown itemId: " + itemId));
+
+        // Idempotency check AFTER taking the row lock: under READ COMMITTED the lookup after the
+        // lock wait sees the winner's committed order, so a concurrent retry returns it instead
+        // of building a second one.
         var existing = orderRepository.findByIdempotencyKey(idempotencyKey);
         if (existing.isPresent()) {
             return existing.get();
         }
-
-        InventoryItem item = inventoryItemRepository.findByIdForUpdate(itemId)
-                .orElseThrow(() -> new IllegalArgumentException("Unknown itemId: " + itemId));
 
         Order order = new Order(itemId, quantityRequested, idempotencyKey);
 
