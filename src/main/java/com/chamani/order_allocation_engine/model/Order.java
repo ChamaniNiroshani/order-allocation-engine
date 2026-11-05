@@ -33,12 +33,23 @@ public class Order {
     // Why the order was rejected. Stored so an idempotent retry returns the same answer.
     private String failureReason;
 
+    // SHA-256 of the request payload (itemId + quantity). Nullable on purpose: rows created before
+    // this column existed have none, and ddl-auto=update cannot add a NOT NULL column to a table
+    // that already has rows.
+    @Column(length = 64)
+    private String requestHash;
+
     protected Order() {}
 
     public Order(UUID itemId, Integer quantityRequested, String idempotencyKey) {
         this.itemId = itemId;
         this.quantityRequested = quantityRequested;
         this.idempotencyKey = idempotencyKey;
+    }
+
+    public Order(UUID itemId, Integer quantityRequested, String idempotencyKey, String requestHash) {
+        this(itemId, quantityRequested, idempotencyKey);
+        this.requestHash = requestHash;
     }
 
     public UUID getOrderId() { return orderId; }
@@ -49,6 +60,11 @@ public class Order {
     public String getIdempotencyKey() { return idempotencyKey; }
     public Instant getCreatedAt() { return createdAt; }
     public String getFailureReason() { return failureReason; }
+
+    /** True when the stored hash equals the given one, or when there is none (legacy rows). */
+    public boolean matchesRequestHash(String hash) {
+        return requestHash == null || requestHash.equals(hash);
+    }
 
     public void markAllocated() {
         this.status = OrderStatus.ALLOCATED;

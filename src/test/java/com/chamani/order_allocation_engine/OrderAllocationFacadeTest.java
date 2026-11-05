@@ -1,9 +1,11 @@
 package com.chamani.order_allocation_engine;
 
+import com.chamani.order_allocation_engine.exception.IdempotencyKeyReusedException;
 import com.chamani.order_allocation_engine.model.Order;
 import com.chamani.order_allocation_engine.repository.OrderRepository;
 import com.chamani.order_allocation_engine.service.AllocationService;
 import com.chamani.order_allocation_engine.service.OrderAllocationFacade;
+import com.chamani.order_allocation_engine.service.RequestHash;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -52,5 +54,25 @@ class OrderAllocationFacadeTest {
         DataIntegrityViolationException thrown =
                 assertThrows(DataIntegrityViolationException.class, () -> facade.allocate(itemId, 10, KEY));
         assertSame(original, thrown);
+    }
+
+    @Test
+    void onConflictWithDifferentHash_throwsIdempotencyKeyReused() {
+        UUID itemId = UUID.randomUUID();
+        Order stored = new Order(itemId, 10, KEY, RequestHash.of(itemId, 10));
+        when(allocationService.allocate(itemId, 20, KEY)).thenThrow(new DataIntegrityViolationException("duplicate key"));
+        when(orderRepository.findByIdempotencyKey(KEY)).thenReturn(Optional.of(stored));
+
+        assertThrows(IdempotencyKeyReusedException.class, () -> facade.allocate(itemId, 20, KEY));
+    }
+
+    @Test
+    void onConflictWithSameHash_returnsTheStoredOrder() {
+        UUID itemId = UUID.randomUUID();
+        Order stored = new Order(itemId, 10, KEY, RequestHash.of(itemId, 10));
+        when(allocationService.allocate(itemId, 10, KEY)).thenThrow(new DataIntegrityViolationException("duplicate key"));
+        when(orderRepository.findByIdempotencyKey(KEY)).thenReturn(Optional.of(stored));
+
+        assertSame(stored, facade.allocate(itemId, 10, KEY));
     }
 }
