@@ -38,3 +38,6 @@ build/
 
 ### GitHub Copilot app modernization (local tool files) ###
 .github/modernize/
+
+### Local secrets ###
+.env
