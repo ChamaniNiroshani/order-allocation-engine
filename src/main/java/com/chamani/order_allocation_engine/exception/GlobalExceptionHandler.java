@@ -1,5 +1,6 @@
 package com.chamani.order_allocation_engine.exception;
 
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
@@ -37,6 +38,14 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(IdempotencyKeyReusedException.class)
     public ResponseEntity<Map<String, Object>> handleKeyReused(IdempotencyKeyReusedException ex) {
         return buildResponse(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
+    }
+
+    @ExceptionHandler(StockContentionException.class)
+    public ResponseEntity<Map<String, Object>> handleContention(StockContentionException ex) {
+        ResponseEntity<Map<String, Object>> response = buildResponse(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
+        return ResponseEntity.status(response.getStatusCode())
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(ex.getRetryAfterSeconds()))
+                .body(response.getBody());
     }
 
     @ExceptionHandler(MissingRequestHeaderException.class)

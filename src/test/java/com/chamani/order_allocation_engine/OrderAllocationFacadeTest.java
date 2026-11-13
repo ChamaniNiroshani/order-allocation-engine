@@ -1,6 +1,7 @@
 package com.chamani.order_allocation_engine;
 
 import com.chamani.order_allocation_engine.exception.IdempotencyKeyReusedException;
+import com.chamani.order_allocation_engine.concurrency.OptimisticRetryExecutor;
 import com.chamani.order_allocation_engine.model.Order;
 import com.chamani.order_allocation_engine.repository.OrderRepository;
 import com.chamani.order_allocation_engine.service.AllocationService;
@@ -10,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 
@@ -30,6 +32,9 @@ class OrderAllocationFacadeTest {
 
     @Mock
     private OrderRepository orderRepository;
+
+    @Spy
+    private OptimisticRetryExecutor optimisticRetry = new OptimisticRetryExecutor();
 
     @InjectMocks
     private OrderAllocationFacade facade;
