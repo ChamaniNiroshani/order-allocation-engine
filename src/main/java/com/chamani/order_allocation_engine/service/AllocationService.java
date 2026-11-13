@@ -1,31 +1,38 @@
 package com.chamani.order_allocation_engine.service;
 
+import com.chamani.order_allocation_engine.concurrency.AllocationProperties;
+import com.chamani.order_allocation_engine.concurrency.DecrementResult;
+import com.chamani.order_allocation_engine.concurrency.StockDecrementer;
 import com.chamani.order_allocation_engine.exception.IdempotencyKeyReusedException;
 import com.chamani.order_allocation_engine.model.Allocation;
-import com.chamani.order_allocation_engine.model.InventoryItem;
 import com.chamani.order_allocation_engine.model.Order;
 import com.chamani.order_allocation_engine.model.OrderStatus;
 import com.chamani.order_allocation_engine.repository.AllocationRepository;
-import com.chamani.order_allocation_engine.repository.InventoryItemRepository;
 import com.chamani.order_allocation_engine.repository.OrderRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.UUID;
 
 @Service
 public class AllocationService {
 
     private final OrderRepository orderRepository;
-    private final InventoryItemRepository inventoryItemRepository;
     private final AllocationRepository allocationRepository;
+    private final StockDecrementer stockDecrementer;
 
     public AllocationService(OrderRepository orderRepository,
-                              InventoryItemRepository inventoryItemRepository,
-                              AllocationRepository allocationRepository) {
+                              AllocationRepository allocationRepository,
+                              List<StockDecrementer> decrementers,
+                              AllocationProperties properties) {
         this.orderRepository = orderRepository;
-        this.inventoryItemRepository = inventoryItemRepository;
         this.allocationRepository = allocationRepository;
+        this.stockDecrementer = decrementers.stream()
+                .filter(d -> d.mode() == properties.lockingMode())
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "No StockDecrementer for allocation.locking-mode=" + properties.lockingMode()));
     }
 
     /**
@@ -39,12 +46,9 @@ public class AllocationService {
 
         String requestHash = RequestHash.of(itemId, quantityRequested);
 
-        InventoryItem item = inventoryItemRepository.findByIdForUpdate(itemId)
-                .orElseThrow(() -> new IllegalArgumentException("Unknown itemId: " + itemId));
-
-        // Idempotency check AFTER taking the row lock: under READ COMMITTED the lookup after the
-        // lock wait sees the winner's committed order, so a concurrent retry returns it instead
-        // of building a second one.
+        // Replay check BEFORE touching stock, so a retried key never decrements twice. Two
+        // concurrent first-time requests with the same key can both miss here; the unique
+        // constraint on idempotency_key settles that (see OrderAllocationFacade).
         var existing = orderRepository.findByIdempotencyKey(idempotencyKey);
         if (existing.isPresent()) {
             Order stored = existing.get();
@@ -56,14 +60,11 @@ public class AllocationService {
 
         Order order = new Order(itemId, quantityRequested, idempotencyKey, requestHash);
 
-        if (item.getQuantityAvailable() < quantityRequested) {
-            order.markFailed("Insufficient inventory: only " + item.getQuantityAvailable() + " available");
+        DecrementResult result = stockDecrementer.decrement(itemId, quantityRequested);
+        if (!result.isDecremented()) {
+            order.markFailed("Insufficient inventory: only " + result.available() + " available");
             return orderRepository.save(order);
         }
-
-        // Decrement inventory
-        item.setQuantityAvailable(item.getQuantityAvailable() - quantityRequested);
-        inventoryItemRepository.save(item);
 
         // Save the order first so it has a generated orderId
         order.markAllocated();
