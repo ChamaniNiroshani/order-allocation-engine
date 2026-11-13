@@ -11,6 +11,7 @@ import com.chamani.order_allocation_engine.service.OrderAllocationFacade;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import java.util.ArrayList;
@@ -23,11 +24,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Integration tests for AllocationService against the real PostgreSQL database
- * configured in application.properties (needs the DB_PASSWORD env var, same as the app).
+ * Integration tests for AllocationService against a real PostgreSQL (Testcontainers).
  * Each test creates its own inventory item, so tests do not interfere with each other.
  */
 @SpringBootTest
+@Import(TestcontainersConfiguration.class)
 class AllocationConcurrencyTest {
 
     @Autowired
