@@ -1,5 +1,6 @@
 package com.chamani.order_allocation_engine.service;
 
+import com.chamani.order_allocation_engine.exception.IdempotencyKeyReusedException;
 import com.chamani.order_allocation_engine.model.Allocation;
 import com.chamani.order_allocation_engine.model.InventoryItem;
 import com.chamani.order_allocation_engine.model.Order;
@@ -36,6 +37,8 @@ public class AllocationService {
     @Transactional
     public Order allocate(UUID itemId, Integer quantityRequested, String idempotencyKey) {
 
+        String requestHash = RequestHash.of(itemId, quantityRequested);
+
         InventoryItem item = inventoryItemRepository.findByIdForUpdate(itemId)
                 .orElseThrow(() -> new IllegalArgumentException("Unknown itemId: " + itemId));
 
@@ -44,10 +47,14 @@ public class AllocationService {
         // of building a second one.
         var existing = orderRepository.findByIdempotencyKey(idempotencyKey);
         if (existing.isPresent()) {
-            return existing.get();
+            Order stored = existing.get();
+            if (!stored.matchesRequestHash(requestHash)) {
+                throw new IdempotencyKeyReusedException(idempotencyKey);
+            }
+            return stored;
         }
 
-        Order order = new Order(itemId, quantityRequested, idempotencyKey);
+        Order order = new Order(itemId, quantityRequested, idempotencyKey, requestHash);
 
         if (item.getQuantityAvailable() < quantityRequested) {
             order.markFailed("Insufficient inventory: only " + item.getQuantityAvailable() + " available");

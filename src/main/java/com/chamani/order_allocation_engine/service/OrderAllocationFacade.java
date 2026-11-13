@@ -1,5 +1,6 @@
 package com.chamani.order_allocation_engine.service;
 
+import com.chamani.order_allocation_engine.exception.IdempotencyKeyReusedException;
 import com.chamani.order_allocation_engine.model.Order;
 import com.chamani.order_allocation_engine.repository.OrderRepository;
 import org.slf4j.Logger;
@@ -32,9 +33,12 @@ public class OrderAllocationFacade {
         try {
             return allocationService.allocate(itemId, quantityRequested, idempotencyKey);
         } catch (DataIntegrityViolationException e) {
-            log.info("Idempotency conflict for key {}, returning the stored order", idempotencyKey);
-            // TODO(OAE-03): when payload hashing lands, this re-read must also check the payload hash.
-            return orderRepository.findByIdempotencyKey(idempotencyKey).orElseThrow(() -> e);
+            log.info("Idempotency conflict for key {}, checking the stored order", idempotencyKey);
+            Order stored = orderRepository.findByIdempotencyKey(idempotencyKey).orElseThrow(() -> e);
+            if (!stored.matchesRequestHash(RequestHash.of(itemId, quantityRequested))) {
+                throw new IdempotencyKeyReusedException(idempotencyKey);
+            }
+            return stored;
         }
     }
 }

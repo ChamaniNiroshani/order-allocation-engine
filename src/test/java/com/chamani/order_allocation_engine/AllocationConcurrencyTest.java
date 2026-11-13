@@ -1,5 +1,6 @@
 package com.chamani.order_allocation_engine;
 
+import com.chamani.order_allocation_engine.exception.IdempotencyKeyReusedException;
 import com.chamani.order_allocation_engine.model.InventoryItem;
 import com.chamani.order_allocation_engine.model.Order;
 import com.chamani.order_allocation_engine.model.OrderStatus;
@@ -10,6 +11,7 @@ import com.chamani.order_allocation_engine.service.OrderAllocationFacade;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -146,7 +148,10 @@ class AllocationConcurrencyTest {
         CountDownLatch ready = new CountDownLatch(threads);
         CountDownLatch go = new CountDownLatch(1);
 
-        AtomicInteger errors = new AtomicInteger();
+        AtomicInteger reused = new AtomicInteger();
+        AtomicInteger unexpected = new AtomicInteger();
+        AtomicInteger integrityViolations = new AtomicInteger();
+        AtomicInteger successes = new AtomicInteger();
         Set<UUID> orderIds = ConcurrentHashMap.newKeySet();
 
         List<Future<?>> futures = new ArrayList<>();
@@ -158,8 +163,14 @@ class AllocationConcurrencyTest {
                     go.await();
                     Order order = allocationFacade.allocate(itemId, 10, key);
                     orderIds.add(order.getOrderId());
+                    successes.incrementAndGet();
+                } catch (IdempotencyKeyReusedException e) {
+                    reused.incrementAndGet();
+                } catch (DataIntegrityViolationException e) {
+                    integrityViolations.incrementAndGet();
+                    e.printStackTrace();
                 } catch (Exception e) {
-                    errors.incrementAndGet();
+                    unexpected.incrementAndGet();
                     e.printStackTrace();
                 }
             }));
@@ -175,8 +186,14 @@ class AllocationConcurrencyTest {
         int remainingA = inventoryItemRepository.findById(itemA).orElseThrow().getQuantityAvailable();
         int remainingB = inventoryItemRepository.findById(itemB).orElseThrow().getQuantityAvailable();
 
-        assertEquals(0, errors.get(), "no retry may fail");
-        assertEquals(1, orderIds.size(), "all retries must return the same order");
+        assertEquals(0, integrityViolations.get(), "no DataIntegrityViolationException may escape");
+        assertEquals(0, unexpected.get(), "no other error may occur");
+        // Exactly one order wins. Threads that sent the winner's own payload (same item, same
+        // quantity) are legitimate retries and get that order back; threads on the other item
+        // reuse the key with a different payload and are rejected.
+        assertEquals(1, orderIds.size(), "only one order may exist for the key");
+        assertEquals(threads / 2, successes.get(), "only the winner's own retries may succeed");
+        assertEquals(threads / 2, reused.get(), "every thread with the other item must be rejected");
         assertEquals(total - 10, remainingA + remainingB, "stock must be deducted exactly once");
     }
 
@@ -231,5 +248,109 @@ class AllocationConcurrencyTest {
     void unknownItem_throwsIllegalArgument() {
         assertThrows(IllegalArgumentException.class,
                 () -> allocationService.allocate(UUID.randomUUID(), 5, "junit-" + UUID.randomUUID()));
+    }
+
+    @Test
+    void sameKey_differentQuantity_throwsReused_andChangesNothing() {
+        UUID itemId = inventoryItemRepository.save(new InventoryItem(100)).getItemId();
+        String key = "junit-reuse-qty-" + UUID.randomUUID();
+
+        Order first = allocationFacade.allocate(itemId, 10, key);
+
+        assertThrows(IdempotencyKeyReusedException.class, () -> allocationFacade.allocate(itemId, 20, key));
+
+        assertEquals(90, inventoryItemRepository.findById(itemId).orElseThrow().getQuantityAvailable(),
+                "the rejected reuse must not touch stock");
+        assertEquals(1, orderRepository.findAll().stream().filter(o -> key.equals(o.getIdempotencyKey())).count(),
+                "still exactly one order for the key");
+        Order stored = orderRepository.findByIdempotencyKey(key).orElseThrow();
+        assertEquals(first.getOrderId(), stored.getOrderId());
+        assertEquals(10, stored.getQuantityRequested());
+    }
+
+    @Test
+    void sameKey_differentItem_throwsReused_andChangesNothing() {
+        UUID itemA = inventoryItemRepository.save(new InventoryItem(100)).getItemId();
+        UUID itemB = inventoryItemRepository.save(new InventoryItem(100)).getItemId();
+        String key = "junit-reuse-item-" + UUID.randomUUID();
+
+        allocationFacade.allocate(itemA, 10, key);
+
+        assertThrows(IdempotencyKeyReusedException.class, () -> allocationFacade.allocate(itemB, 10, key));
+
+        assertEquals(90, inventoryItemRepository.findById(itemA).orElseThrow().getQuantityAvailable());
+        assertEquals(100, inventoryItemRepository.findById(itemB).orElseThrow().getQuantityAvailable(),
+                "the other item must be untouched");
+        assertEquals(itemA, orderRepository.findByIdempotencyKey(key).orElseThrow().getItemId());
+    }
+
+    @Test
+    void failedOrderReplay_samePayloadReturnsSameOrder_differentPayloadThrowsReused() {
+        UUID itemId = inventoryItemRepository.save(new InventoryItem(5)).getItemId();
+        String key = "junit-reuse-failed-" + UUID.randomUUID();
+
+        Order first = allocationFacade.allocate(itemId, 10, key);
+        assertEquals(OrderStatus.FAILED, first.getStatus());
+
+        Order replay = allocationFacade.allocate(itemId, 10, key);
+        assertEquals(first.getOrderId(), replay.getOrderId());
+        assertEquals(OrderStatus.FAILED, replay.getStatus());
+
+        assertThrows(IdempotencyKeyReusedException.class, () -> allocationFacade.allocate(itemId, 3, key),
+                "3 would fit in stock, but the key is bound to the quantity-10 payload");
+        assertEquals(5, inventoryItemRepository.findById(itemId).orElseThrow().getQuantityAvailable());
+    }
+
+    @Test
+    void sameKey_tenThreadsDifferentQuantities_exactlyOneWins() throws Exception {
+        final int threads = 10;
+        UUID itemId = inventoryItemRepository.save(new InventoryItem(100)).getItemId();
+        final String key = "junit-same-key-diff-qty-" + UUID.randomUUID();
+
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CountDownLatch ready = new CountDownLatch(threads);
+        CountDownLatch go = new CountDownLatch(1);
+
+        AtomicInteger reused = new AtomicInteger();
+        AtomicInteger integrityViolations = new AtomicInteger();
+        AtomicInteger unexpected = new AtomicInteger();
+        List<Order> winners = new CopyOnWriteArrayList<>();
+
+        List<Future<?>> futures = new ArrayList<>();
+        for (int i = 1; i <= threads; i++) {
+            final int quantity = i;                    // 1..10, every thread has a different payload
+            futures.add(pool.submit(() -> {
+                ready.countDown();
+                try {
+                    go.await();
+                    winners.add(allocationFacade.allocate(itemId, quantity, key));
+                } catch (IdempotencyKeyReusedException e) {
+                    reused.incrementAndGet();
+                } catch (DataIntegrityViolationException e) {
+                    integrityViolations.incrementAndGet();
+                    e.printStackTrace();
+                } catch (Exception e) {
+                    unexpected.incrementAndGet();
+                    e.printStackTrace();
+                }
+            }));
+        }
+
+        assertTrue(ready.await(10, TimeUnit.SECONDS), "threads did not start in time");
+        go.countDown();
+        for (Future<?> f : futures) {
+            f.get(30, TimeUnit.SECONDS);
+        }
+        pool.shutdown();
+
+        assertEquals(0, integrityViolations.get(), "no DataIntegrityViolationException may escape");
+        assertEquals(0, unexpected.get(), "no other error may occur");
+        assertEquals(1, winners.size(), "exactly one thread may succeed");
+        assertEquals(threads - 1, reused.get(), "all other threads must get IdempotencyKeyReusedException");
+
+        int winnerQuantity = winners.get(0).getQuantityRequested();
+        assertEquals(100 - winnerQuantity,
+                inventoryItemRepository.findById(itemId).orElseThrow().getQuantityAvailable(),
+                "stock must be deducted once, for the winner's quantity");
     }
 }
