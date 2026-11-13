@@ -1,5 +1,6 @@
 package com.chamani.order_allocation_engine.service;
 
+import com.chamani.order_allocation_engine.concurrency.OptimisticRetryExecutor;
 import com.chamani.order_allocation_engine.exception.IdempotencyKeyReusedException;
 import com.chamani.order_allocation_engine.model.Order;
 import com.chamani.order_allocation_engine.repository.OrderRepository;
@@ -23,15 +24,21 @@ public class OrderAllocationFacade {
 
     private final AllocationService allocationService;
     private final OrderRepository orderRepository;
+    private final OptimisticRetryExecutor optimisticRetry;
 
-    public OrderAllocationFacade(AllocationService allocationService, OrderRepository orderRepository) {
+    public OrderAllocationFacade(AllocationService allocationService, OrderRepository orderRepository,
+                                 OptimisticRetryExecutor optimisticRetry) {
         this.allocationService = allocationService;
         this.orderRepository = orderRepository;
+        this.optimisticRetry = optimisticRetry;
     }
 
     public Order allocate(UUID itemId, Integer quantityRequested, String idempotencyKey) {
         try {
-            return allocationService.allocate(itemId, quantityRequested, idempotencyKey);
+            // Each attempt is a fresh transaction through the AllocationService proxy. A no-op
+            // unless the optimistic strategy loses a version race.
+            return optimisticRetry.execute(
+                    () -> allocationService.allocate(itemId, quantityRequested, idempotencyKey));
         } catch (DataIntegrityViolationException e) {
             log.info("Idempotency conflict for key {}, checking the stored order", idempotencyKey);
             Order stored = orderRepository.findByIdempotencyKey(idempotencyKey).orElseThrow(() -> e);

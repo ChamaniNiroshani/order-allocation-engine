@@ -16,10 +16,11 @@ public class TransactionLog {
     private UUID entityId;
     private String action;
 
-    @Lob
+    // columnDefinition = "text": a @Lob String would map to oid in Postgres.
+    @Column(columnDefinition = "text")
     private String beforeState;
 
-    @Lob
+    @Column(columnDefinition = "text")
     private String afterState;
 
     private Instant timestamp = Instant.now();

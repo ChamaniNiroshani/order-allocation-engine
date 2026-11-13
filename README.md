@@ -33,8 +33,8 @@ transaction/audit trail.
 ./mvnw verify
 ```
 
-Tests use the same Postgres instance via Spring Boot's Docker Compose
-support, so Docker must be running.
+Tests start their own throwaway Postgres with Testcontainers, so Docker must
+be running. No local DB or env vars are needed.
 
 ## Configuration
 

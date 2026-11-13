@@ -11,7 +11,9 @@ import com.chamani.order_allocation_engine.service.OrderAllocationFacade;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -23,12 +25,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Integration tests for AllocationService against the real PostgreSQL database
- * configured in application.properties (needs the DB_PASSWORD env var, same as the app).
- * Each test creates its own inventory item, so tests do not interfere with each other.
+ * Integration tests for allocation against a real PostgreSQL (Testcontainers). The suite is
+ * mode-agnostic: one subclass per allocation.locking-mode runs every test against that strategy.
+ * Each test creates its own inventory items, so tests do not interfere with each other.
  */
 @SpringBootTest
-class AllocationConcurrencyTest {
+@Import(TestcontainersConfiguration.class)
+abstract class AbstractAllocationConcurrencyTest {
 
     @Autowired
     private AllocationService allocationService;
@@ -42,8 +45,18 @@ class AllocationConcurrencyTest {
     @Autowired
     private OrderRepository orderRepository;
 
+    @Autowired
+    private JdbcTemplate jdbc;
+
+    /** Total quantity recorded in allocation rows for the item, straight from the database. */
+    private int allocatedInDb(UUID itemId) {
+        return jdbc.queryForObject(
+                "SELECT COALESCE(SUM(quantity_allocated), 0) FROM allocation WHERE item_id = ?",
+                Integer.class, itemId);
+    }
+
     @Test
-    void concurrentRequests_neverOversell() throws Exception {
+    void hotItem_neverOversells_andKeepsStockInvariant() throws Exception {
         final int stock = 100;
         final int quantityPerOrder = 10;
         final int requests = 20;                       // 20 x 10 = 200 requested, only 100 available
@@ -65,7 +78,8 @@ class AllocationConcurrencyTest {
                 ready.countDown();
                 try {
                     go.await();                        // release all threads at the same instant
-                    Order order = allocationService.allocate(itemId, quantityPerOrder, key);
+                    // Through the facade, as the controller does: it owns the optimistic retry.
+                    Order order = allocationFacade.allocate(itemId, quantityPerOrder, key);
                     if (order.getStatus() == OrderStatus.ALLOCATED) {
                         allocated.incrementAndGet();
                     } else if (order.getStatus() == OrderStatus.FAILED) {
@@ -83,7 +97,7 @@ class AllocationConcurrencyTest {
         assertTrue(ready.await(10, TimeUnit.SECONDS), "threads did not start in time");
         go.countDown();
         for (Future<?> f : futures) {
-            f.get(30, TimeUnit.SECONDS);
+            f.get(60, TimeUnit.SECONDS);
         }
         pool.shutdown();
 
@@ -93,6 +107,68 @@ class AllocationConcurrencyTest {
         assertEquals(stock / quantityPerOrder, allocated.get(), "exactly 10 orders should be allocated");
         assertEquals(requests - allocated.get(), rejected.get(), "all other requests should be rejected for insufficient stock");
         assertEquals(0, remaining, "stock must be fully consumed and never negative");
+
+        // Invariant: every unit is either allocated or still on the shelf. The DB rows must agree
+        // with what the callers were told.
+        int allocatedQuantity = allocatedInDb(itemId);
+        assertEquals(allocated.get() * quantityPerOrder, allocatedQuantity, "allocation rows match ALLOCATED responses");
+        assertEquals(stock, allocatedQuantity + remaining, "sum(allocated) + remaining == initial stock");
+    }
+
+    @Test
+    void manyItemsLowContention_allocateExactly_andKeepStockInvariant() throws Exception {
+        final int items = 50;
+        final int stock = 10;
+        final int quantityPerOrder = 5;
+        final int requestsPerItem = 3;                 // 15 requested per item, 10 available: 2 win, 1 loses
+
+        List<UUID> itemIds = new ArrayList<>();
+        for (int i = 0; i < items; i++) {
+            itemIds.add(inventoryItemRepository.save(new InventoryItem(stock)).getItemId());
+        }
+
+        int total = items * requestsPerItem;
+        ExecutorService pool = Executors.newFixedThreadPool(16);
+        CountDownLatch go = new CountDownLatch(1);
+        ConcurrentMap<UUID, AtomicInteger> allocatedPerItem = new ConcurrentHashMap<>();
+        AtomicInteger unexpected = new AtomicInteger();
+
+        List<Future<?>> futures = new ArrayList<>();
+        for (UUID itemId : itemIds) {
+            for (int r = 0; r < requestsPerItem; r++) {
+                final String key = "junit-spread-" + UUID.randomUUID();
+                futures.add(pool.submit(() -> {
+                    try {
+                        go.await();
+                        Order order = allocationFacade.allocate(itemId, quantityPerOrder, key);
+                        if (order.getStatus() == OrderStatus.ALLOCATED) {
+                            allocatedPerItem.computeIfAbsent(itemId, k -> new AtomicInteger()).incrementAndGet();
+                        } else if (order.getStatus() != OrderStatus.FAILED) {
+                            unexpected.incrementAndGet();
+                        }
+                    } catch (Exception e) {
+                        unexpected.incrementAndGet();
+                        e.printStackTrace();
+                    }
+                }));
+            }
+        }
+
+        go.countDown();
+        for (Future<?> f : futures) {
+            f.get(60, TimeUnit.SECONDS);
+        }
+        pool.shutdown();
+
+        assertEquals(0, unexpected.get(), "no request may fail with an unexpected error (" + total + " requests)");
+        for (UUID itemId : itemIds) {
+            int remaining = inventoryItemRepository.findById(itemId).orElseThrow().getQuantityAvailable();
+            int allocated = allocatedPerItem.getOrDefault(itemId, new AtomicInteger()).get();
+
+            assertEquals(stock / quantityPerOrder, allocated, "two of the three requests fit");
+            assertEquals(0, remaining);
+            assertEquals(stock, allocatedInDb(itemId) + remaining, "sum(allocated) + remaining == initial stock");
+        }
     }
 
     @Test
