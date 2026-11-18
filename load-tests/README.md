@@ -37,6 +37,8 @@ internet access.
 | `QTY` | `1` | Quantity per order |
 | `ITEMS` | `100` | Number of items (`spread.js` only) |
 | `MODE` | `unknown` | Locking mode, used in the result file name only. Set the real mode on the app with `--allocation.locking-mode=...` |
+| `RESULT_DIR` | `results` | Output folder under `load-tests/` (must exist) |
+| `SAVE_RESULT` | `true` | `false` skips the JSON file (used for warm-ups) |
 
 With the default `STOCK=1000` a hot item runs out after 1000 orders and the rest of the run measures
 the `409` rejection path. Use a large `STOCK` (for example `-e STOCK=100000000`) to benchmark allocation.

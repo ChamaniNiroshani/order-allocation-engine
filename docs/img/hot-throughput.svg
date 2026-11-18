@@ -1,0 +1,49 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" width="720" height="420" viewBox="0 0 720 420" font-family="Segoe UI, Arial, sans-serif" font-size="13">
+<rect width="720" height="420" fill="#ffffff"/>
+<text x="360" y="26" text-anchor="middle" font-size="16" font-weight="bold" fill="#222">Hot item: successful allocations per second vs concurrent users</text>
+<line x1="70" y1="350" x2="680" y2="350" stroke="#e3e3e3"/>
+<text x="62" y="354" text-anchor="end" fill="#555">0</text>
+<line x1="70" y1="307.1" x2="680" y2="307.1" stroke="#e3e3e3"/>
+<text x="62" y="311.1" text-anchor="end" fill="#555">20</text>
+<line x1="70" y1="264.3" x2="680" y2="264.3" stroke="#e3e3e3"/>
+<text x="62" y="268.3" text-anchor="end" fill="#555">40</text>
+<line x1="70" y1="221.4" x2="680" y2="221.4" stroke="#e3e3e3"/>
+<text x="62" y="225.4" text-anchor="end" fill="#555">60</text>
+<line x1="70" y1="178.6" x2="680" y2="178.6" stroke="#e3e3e3"/>
+<text x="62" y="182.6" text-anchor="end" fill="#555">80</text>
+<line x1="70" y1="135.7" x2="680" y2="135.7" stroke="#e3e3e3"/>
+<text x="62" y="139.7" text-anchor="end" fill="#555">100</text>
+<line x1="70" y1="92.9" x2="680" y2="92.9" stroke="#e3e3e3"/>
+<text x="62" y="96.9" text-anchor="end" fill="#555">120</text>
+<line x1="70" y1="50" x2="680" y2="50" stroke="#e3e3e3"/>
+<text x="62" y="54" text-anchor="end" fill="#555">140</text>
+<text x="70" y="372" text-anchor="middle" fill="#555">10</text>
+<text x="273.3" y="372" text-anchor="middle" fill="#555">50</text>
+<text x="476.7" y="372" text-anchor="middle" fill="#555">100</text>
+<text x="680" y="372" text-anchor="middle" fill="#555">200</text>
+<text x="375" y="396" text-anchor="middle" fill="#222">VUs (concurrent users)</text>
+<text transform="translate(18 200) rotate(-90)" text-anchor="middle" fill="#222">201 responses per second (median of 3 runs)</text>
+<line x1="70" y1="350" x2="680" y2="350" stroke="#888"/>
+<polyline points="70,148.8 273.3,137.9 476.7,131 680,145.1" fill="none" stroke="#1f77b4" stroke-width="2.5"/>
+<circle cx="70" cy="148.8" r="4" fill="#1f77b4"/>
+<circle cx="273.3" cy="137.9" r="4" fill="#1f77b4"/>
+<circle cx="476.7" cy="131" r="4" fill="#1f77b4"/>
+<circle cx="680" cy="145.1" r="4" fill="#1f77b4"/>
+<rect x="80" y="56" width="14" height="4" fill="#1f77b4"/>
+<text x="100" y="62" fill="#222">PESSIMISTIC</text>
+<polyline points="70,212.4 273.3,200 476.7,203 680,215.6" fill="none" stroke="#d62728" stroke-width="2.5"/>
+<circle cx="70" cy="212.4" r="4" fill="#d62728"/>
+<circle cx="273.3" cy="200" r="4" fill="#d62728"/>
+<circle cx="476.7" cy="203" r="4" fill="#d62728"/>
+<circle cx="680" cy="215.6" r="4" fill="#d62728"/>
+<rect x="208" y="56" width="14" height="4" fill="#d62728"/>
+<text x="228" y="62" fill="#222">OPTIMISTIC</text>
+<polyline points="70,159.5 273.3,145.4 476.7,161.6 680,155.4" fill="none" stroke="#2ca02c" stroke-width="2.5"/>
+<circle cx="70" cy="159.5" r="4" fill="#2ca02c"/>
+<circle cx="273.3" cy="145.4" r="4" fill="#2ca02c"/>
+<circle cx="476.7" cy="161.6" r="4" fill="#2ca02c"/>
+<circle cx="680" cy="155.4" r="4" fill="#2ca02c"/>
+<rect x="328" y="56" width="14" height="4" fill="#2ca02c"/>
+<text x="348" y="62" fill="#222">ATOMIC_UPDATE</text>
+</svg>
+

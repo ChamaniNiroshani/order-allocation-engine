@@ -12,6 +12,8 @@ export const cfg = {
   QTY: parseInt(__ENV.QTY || '1', 10),
   ITEMS: parseInt(__ENV.ITEMS || '100', 10),
   MODE: __ENV.MODE || 'unknown', // only used in the result file name
+  RESULT_DIR: __ENV.RESULT_DIR || 'results', // under load-tests/, e.g. results/matrix-<timestamp>
+  SAVE_RESULT: (__ENV.SAVE_RESULT || 'true') !== 'false', // false for warm-ups
 };
 
 // 409 (insufficient stock) is a correct business outcome, not a failure, so http_req_failed
@@ -66,9 +68,10 @@ export function placeOrder(itemId) {
 // <script>-<mode>-<vus>vus-<timestamp>.json under load-tests/results/, plus the normal text summary.
 export function makeSummary(scriptName, data) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const file = `/scripts/results/${scriptName}-${cfg.MODE}-${cfg.VUS}vus-${stamp}.json`;
-  return {
-    [file]: JSON.stringify(data, null, 2),
-    stdout: textSummary(data, { indent: ' ', enableColors: false }),
-  };
+  const file = `/scripts/${cfg.RESULT_DIR}/${scriptName}-${cfg.MODE}-${cfg.VUS}vus-${stamp}.json`;
+  const out = { stdout: textSummary(data, { indent: ' ', enableColors: false }) };
+  if (cfg.SAVE_RESULT) {
+    out[file] = JSON.stringify(data, null, 2);
+  }
+  return out;
 }

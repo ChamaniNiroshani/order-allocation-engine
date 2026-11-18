@@ -7,6 +7,7 @@ import com.chamani.order_allocation_engine.repository.OrderRepository;
 import com.chamani.order_allocation_engine.service.AllocationService;
 import com.chamani.order_allocation_engine.service.OrderAllocationFacade;
 import com.chamani.order_allocation_engine.service.RequestHash;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -34,7 +35,7 @@ class OrderAllocationFacadeTest {
     private OrderRepository orderRepository;
 
     @Spy
-    private OptimisticRetryExecutor optimisticRetry = new OptimisticRetryExecutor();
+    private OptimisticRetryExecutor optimisticRetry = new OptimisticRetryExecutor(new SimpleMeterRegistry());
 
     @InjectMocks
     private OrderAllocationFacade facade;
