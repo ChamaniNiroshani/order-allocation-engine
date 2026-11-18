@@ -4,6 +4,7 @@ import com.chamani.order_allocation_engine.controller.OrderController;
 import com.chamani.order_allocation_engine.exception.GlobalExceptionHandler;
 import com.chamani.order_allocation_engine.exception.StockContentionException;
 import com.chamani.order_allocation_engine.service.OrderAllocationFacade;
+import com.chamani.order_allocation_engine.service.OrderQueryService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -31,6 +32,9 @@ class ContentionHandlerTest {
 
     @MockitoBean
     private OrderAllocationFacade facade;
+
+    @MockitoBean
+    private OrderQueryService orderQueryService;
 
     @Test
     void stockContention_returns503WithRetryAfter() throws Exception {

@@ -1,6 +1,8 @@
 package com.chamani.order_allocation_engine.concurrency;
 
 import com.chamani.order_allocation_engine.exception.StockContentionException;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Component;
@@ -26,17 +28,20 @@ public class OptimisticRetryExecutor {
 
     private final int maxAttempts;
     private final long baseDelayMs;
-    private final AtomicLong retries = new AtomicLong();
+    private final Counter retries;
     private final AtomicLong exhausted = new AtomicLong();
 
     @Autowired
-    public OptimisticRetryExecutor() {
-        this(DEFAULT_MAX_ATTEMPTS, DEFAULT_BASE_DELAY_MS);
+    public OptimisticRetryExecutor(MeterRegistry registry) {
+        this(DEFAULT_MAX_ATTEMPTS, DEFAULT_BASE_DELAY_MS, registry);
     }
 
-    OptimisticRetryExecutor(int maxAttempts, long baseDelayMs) {
+    OptimisticRetryExecutor(int maxAttempts, long baseDelayMs, MeterRegistry registry) {
         this.maxAttempts = maxAttempts;
         this.baseDelayMs = baseDelayMs;
+        this.retries = Counter.builder("allocation.lock.retries")
+                .description("Allocations re-run after losing an optimistic-lock race")
+                .register(registry);
     }
 
     public <T> T execute(Supplier<T> action) {
@@ -48,7 +53,7 @@ public class OptimisticRetryExecutor {
                     exhausted.incrementAndGet();
                     throw new StockContentionException(maxAttempts, RETRY_AFTER_SECONDS, e);
                 }
-                retries.incrementAndGet();
+                retries.increment();
                 backoff(attempt);
             }
         }
@@ -68,8 +73,8 @@ public class OptimisticRetryExecutor {
         }
     }
 
-    /** Total retries so far (a simple counter for now; becomes a Micrometer metric later). */
-    public long retryCount() { return retries.get(); }
+    /** Total retries so far; also exposed as the Micrometer counter allocation.lock.retries. */
+    public long retryCount() { return (long) retries.count(); }
 
     /** Requests that gave up after max attempts. */
     public long exhaustedCount() { return exhausted.get(); }

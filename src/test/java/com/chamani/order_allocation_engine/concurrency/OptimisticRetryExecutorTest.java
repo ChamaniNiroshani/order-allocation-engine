@@ -1,6 +1,7 @@
 package com.chamani.order_allocation_engine.concurrency;
 
 import com.chamani.order_allocation_engine.exception.StockContentionException;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 
@@ -13,7 +14,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class OptimisticRetryExecutorTest {
 
     // base delay 0: no sleeping in unit tests
-    private final OptimisticRetryExecutor executor = new OptimisticRetryExecutor(5, 0);
+    private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
+    private final OptimisticRetryExecutor executor = new OptimisticRetryExecutor(5, 0, registry);
 
     private static ObjectOptimisticLockingFailureException conflict() {
         return new ObjectOptimisticLockingFailureException("InventoryItem", "id");
@@ -38,6 +40,7 @@ class OptimisticRetryExecutorTest {
         assertEquals("ok", result);
         assertEquals(3, calls.get());
         assertEquals(2, executor.retryCount());
+        assertEquals(2.0, registry.get("allocation.lock.retries").counter().count(), "exposed as a Micrometer counter");
         assertEquals(0, executor.exhaustedCount());
     }
 
