@@ -4,6 +4,7 @@ import com.chamani.order_allocation_engine.model.Order;
 import com.chamani.order_allocation_engine.model.OrderStatus;
 import com.chamani.order_allocation_engine.repository.InventoryItemRepository;
 import com.chamani.order_allocation_engine.repository.OrderRepository;
+import com.chamani.order_allocation_engine.service.OrderAuditService;
 import com.chamani.order_allocation_engine.service.StockReservationService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,13 +32,16 @@ public class CheckoutSteps {
     private final OrderRepository orderRepository;
     private final InventoryItemRepository inventoryItemRepository;
     private final StockReservationService stockReservationService;
+    private final OrderAuditService orderAudit;
 
     public CheckoutSteps(OrderRepository orderRepository,
                          InventoryItemRepository inventoryItemRepository,
-                         StockReservationService stockReservationService) {
+                         StockReservationService stockReservationService,
+                         OrderAuditService orderAudit) {
         this.orderRepository = orderRepository;
         this.inventoryItemRepository = inventoryItemRepository;
         this.stockReservationService = stockReservationService;
+        this.orderAudit = orderAudit;
     }
 
     /**
@@ -50,12 +54,15 @@ public class CheckoutSteps {
     @Transactional
     public Reservation reserve(UUID itemId, int quantity, String idempotencyKey, String requestHash) {
         Order order = orderRepository.saveAndFlush(new Order(itemId, quantity, idempotencyKey, requestHash));
+        OrderAuditService.Snapshot before = orderAudit.snapshot(order);
 
         if (!stockReservationService.reserve(itemId, quantity)) {
             order.markFailed(CheckoutOutcomes.REASON_INSUFFICIENT);
+            orderAudit.record(order, before);
             return new Reservation(order, null);
         }
         order.reserve();
+        orderAudit.record(order, before);
 
         BigDecimal unitPrice = inventoryItemRepository.findById(itemId).orElseThrow().getUnitPrice();
         return new Reservation(order, unitPrice.multiply(BigDecimal.valueOf(quantity)));
@@ -71,7 +78,9 @@ public class CheckoutSteps {
         Order order = lock(orderId);
         switch (order.getStatus()) {
             case RESERVED -> {
+                OrderAuditService.Snapshot before = orderAudit.snapshot(order);
                 order.markPaid(paymentId);
+                orderAudit.record(order, before);
                 return PaymentRecording.RECORDED;
             }
             case PAID, CONFIRMED -> {
@@ -94,8 +103,10 @@ public class CheckoutSteps {
         if (order.getStatus() != OrderStatus.PAID) {
             throw new IllegalStateException("Cannot confirm a " + order.getStatus() + " order");
         }
+        OrderAuditService.Snapshot before = orderAudit.snapshot(order);
         stockReservationService.confirm(order.getItemId(), order.getQuantityRequested());
         order.confirm();
+        orderAudit.record(order, before);
         return order;
     }
 
@@ -107,8 +118,10 @@ public class CheckoutSteps {
     public Order compensate(UUID orderId, String reason) {
         Order order = lock(orderId);
         if (order.getStatus() == OrderStatus.RESERVED) {
+            OrderAuditService.Snapshot before = orderAudit.snapshot(order);
             stockReservationService.release(order.getItemId(), order.getQuantityRequested());
             order.cancel(reason);
+            orderAudit.record(order, before);
         }
         return order;
     }
@@ -117,7 +130,9 @@ public class CheckoutSteps {
     @Transactional
     public Order recordRefund(UUID orderId) {
         Order order = lock(orderId);
+        OrderAuditService.Snapshot before = orderAudit.snapshot(order);
         order.recordRefund();
+        orderAudit.record(order, before, OrderAuditService.ACTION_PAYMENT_REFUNDED);
         return order;
     }
 

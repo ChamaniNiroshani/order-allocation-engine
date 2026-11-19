@@ -1,11 +1,13 @@
 package com.chamani.order_allocation_engine.controller;
 
 import com.chamani.order_allocation_engine.dto.CreateOrderRequest;
+import com.chamani.order_allocation_engine.dto.HistoryEntryResponse;
 import com.chamani.order_allocation_engine.dto.OrderResponse;
 import com.chamani.order_allocation_engine.model.Order;
 import com.chamani.order_allocation_engine.model.OrderStatus;
 import com.chamani.order_allocation_engine.service.OrderAllocationFacade;
 import com.chamani.order_allocation_engine.service.OrderQueryService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -27,10 +30,20 @@ public class OrderController {
 
     private final OrderAllocationFacade allocationFacade;
     private final OrderQueryService orderQueryService;
+    private final ObjectMapper objectMapper;
 
-    public OrderController(OrderAllocationFacade allocationFacade, OrderQueryService orderQueryService) {
+    public OrderController(OrderAllocationFacade allocationFacade, OrderQueryService orderQueryService,
+                           ObjectMapper objectMapper) {
         this.allocationFacade = allocationFacade;
         this.orderQueryService = orderQueryService;
+        this.objectMapper = objectMapper;
+    }
+
+    @GetMapping("/{id}/history")
+    public List<HistoryEntryResponse> history(@PathVariable UUID id) {
+        return orderQueryService.history(id).stream()
+                .map(entry -> HistoryEntryResponse.from(entry, objectMapper))
+                .toList();
     }
 
     @GetMapping("/{id}")
