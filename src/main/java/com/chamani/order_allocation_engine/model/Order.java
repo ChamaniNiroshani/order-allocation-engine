@@ -39,6 +39,13 @@ public class Order {
     @Column(length = 64)
     private String requestHash;
 
+    // Saga bookkeeping. reservedAt drives the expiry job; paymentId is the gateway's reference.
+    private Instant reservedAt;
+
+    private Instant updatedAt = Instant.now();
+
+    private String paymentId;
+
     protected Order() {}
 
     public Order(UUID itemId, Integer quantityRequested, String idempotencyKey) {
@@ -56,23 +63,67 @@ public class Order {
     public UUID getItemId() { return itemId; }
     public Integer getQuantityRequested() { return quantityRequested; }
     public OrderStatus getStatus() { return status; }
-    public void setStatus(OrderStatus status) { this.status = status; }
     public String getIdempotencyKey() { return idempotencyKey; }
     public Instant getCreatedAt() { return createdAt; }
     public String getFailureReason() { return failureReason; }
+    public Instant getReservedAt() { return reservedAt; }
+    public Instant getUpdatedAt() { return updatedAt; }
+    public String getPaymentId() { return paymentId; }
 
     /** True when the stored hash equals the given one, or when there is none (legacy rows). */
     public boolean matchesRequestHash(String hash) {
         return requestHash == null || requestHash.equals(hash);
     }
 
+    // ---- state machine -------------------------------------------------------------------------------
+    // Status only changes through these methods. An illegal move throws IllegalStateException.
+
+    private void transitionTo(OrderStatus next) {
+        if (!status.canTransitionTo(next)) {
+            throw new IllegalStateException("Illegal order transition " + status + " -> " + next + " (order " + orderId + ")");
+        }
+        this.status = next;
+        this.updatedAt = Instant.now();
+    }
+
+    /** Direct flow: PENDING -> ALLOCATED. */
     public void markAllocated() {
-        this.status = OrderStatus.ALLOCATED;
+        transitionTo(OrderStatus.ALLOCATED);
         this.failureReason = null;
     }
 
+    /** PENDING -> FAILED (insufficient stock). */
     public void markFailed(String reason) {
-        this.status = OrderStatus.FAILED;
+        transitionTo(OrderStatus.FAILED);
         this.failureReason = reason;
+    }
+
+    /** Saga: PENDING -> RESERVED (stock is held). */
+    public void reserve() {
+        transitionTo(OrderStatus.RESERVED);
+        this.reservedAt = this.updatedAt;
+    }
+
+    /** Saga: RESERVED -> PAID. */
+    public void markPaid(String paymentId) {
+        transitionTo(OrderStatus.PAID);
+        this.paymentId = paymentId;
+    }
+
+    /** Saga: PAID -> CONFIRMED. */
+    public void confirm() {
+        transitionTo(OrderStatus.CONFIRMED);
+    }
+
+    /** Saga compensation: RESERVED -> CANCELLED, or PAID -> CANCELLED (refund case). */
+    public void cancel(String reason) {
+        transitionTo(OrderStatus.CANCELLED);
+        this.failureReason = reason;
+    }
+
+    /** Saga: RESERVED -> EXPIRED (reservation ran out of time). */
+    public void expire() {
+        transitionTo(OrderStatus.EXPIRED);
+        this.failureReason = "Reservation expired";
     }
 }

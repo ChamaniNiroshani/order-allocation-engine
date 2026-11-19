@@ -31,4 +31,42 @@ public interface InventoryItemRepository extends JpaRepository<InventoryItem, UU
              WHERE item_id = :itemId AND quantity_available >= :quantity
             """, nativeQuery = true)
     int decrementIfAvailable(@Param("itemId") UUID itemId, @Param("quantity") int quantity);
+
+    // ---- checkout saga stock moves: one conditional UPDATE each, no read before write ----------------
+    // Each bumps version and returns the rows changed: 1 = done, 0 = the condition did not hold.
+    // flushAutomatically writes pending changes (e.g. the order's new state) first. The persistence
+    // context is NOT cleared: the saga steps never load InventoryItem entities, but they do hold
+    // the locked Order, which clearing would detach.
+
+    /** available -= q, reserved += q, only if enough is available. */
+    @Modifying(flushAutomatically = true)
+    @Query(value = """
+            UPDATE inventory_item
+               SET quantity_available = quantity_available - :quantity,
+                   quantity_reserved = quantity_reserved + :quantity,
+                   version = version + 1
+             WHERE item_id = :itemId AND quantity_available >= :quantity
+            """, nativeQuery = true)
+    int reserveIfAvailable(@Param("itemId") UUID itemId, @Param("quantity") int quantity);
+
+    /** available += q, reserved -= q, only if that much is reserved. */
+    @Modifying(flushAutomatically = true)
+    @Query(value = """
+            UPDATE inventory_item
+               SET quantity_available = quantity_available + :quantity,
+                   quantity_reserved = quantity_reserved - :quantity,
+                   version = version + 1
+             WHERE item_id = :itemId AND quantity_reserved >= :quantity
+            """, nativeQuery = true)
+    int releaseReserved(@Param("itemId") UUID itemId, @Param("quantity") int quantity);
+
+    /** reserved -= q (the units leave the warehouse), only if that much is reserved. */
+    @Modifying(flushAutomatically = true)
+    @Query(value = """
+            UPDATE inventory_item
+               SET quantity_reserved = quantity_reserved - :quantity,
+                   version = version + 1
+             WHERE item_id = :itemId AND quantity_reserved >= :quantity
+            """, nativeQuery = true)
+    int confirmReserved(@Param("itemId") UUID itemId, @Param("quantity") int quantity);
 }
