@@ -18,9 +18,9 @@ public class OrderResponse {
         this.reason = reason;
     }
 
-    /** quantityAllocated is the requested quantity for ALLOCATED orders and 0 otherwise. */
+    /** quantityAllocated is the requested quantity for ALLOCATED (direct flow) and CONFIRMED (saga) orders, else 0. */
     public static OrderResponse from(Order order) {
-        boolean allocated = order.getStatus() == OrderStatus.ALLOCATED;
+        boolean allocated = order.getStatus() == OrderStatus.ALLOCATED || order.getStatus() == OrderStatus.CONFIRMED;
         return new OrderResponse(
                 order.getOrderId(),
                 order.getStatus(),

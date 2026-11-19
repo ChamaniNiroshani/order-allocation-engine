@@ -21,13 +21,16 @@ public class AllocationService {
     private final OrderRepository orderRepository;
     private final AllocationRepository allocationRepository;
     private final StockDecrementer stockDecrementer;
+    private final OrderAuditService orderAudit;
 
     public AllocationService(OrderRepository orderRepository,
                               AllocationRepository allocationRepository,
                               List<StockDecrementer> decrementers,
-                              AllocationProperties properties) {
+                              AllocationProperties properties,
+                              OrderAuditService orderAudit) {
         this.orderRepository = orderRepository;
         this.allocationRepository = allocationRepository;
+        this.orderAudit = orderAudit;
         this.stockDecrementer = decrementers.stream()
                 .filter(d -> d.mode() == properties.lockingMode())
                 .findFirst()
@@ -59,16 +62,20 @@ public class AllocationService {
         }
 
         Order order = new Order(itemId, quantityRequested, idempotencyKey, requestHash);
+        OrderAuditService.Snapshot before = orderAudit.snapshot(order);
 
         DecrementResult result = stockDecrementer.decrement(itemId, quantityRequested);
         if (!result.isDecremented()) {
             order.markFailed("Insufficient inventory: only " + result.available() + " available");
-            return orderRepository.save(order);
+            Order failed = orderRepository.save(order);
+            orderAudit.record(failed, before);
+            return failed;
         }
 
         // Save the order first so it has a generated orderId
         order.markAllocated();
         Order savedOrder = orderRepository.save(order);
+        orderAudit.record(savedOrder, before);
 
         // Record the allocation against the saved order's id
         Allocation allocation = new Allocation(savedOrder.getOrderId(), itemId, quantityRequested, OrderStatus.ALLOCATED);
