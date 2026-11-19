@@ -1,5 +1,6 @@
 package com.chamani.order_allocation_engine.saga;
 
+import com.chamani.order_allocation_engine.logging.OrderEvents;
 import com.chamani.order_allocation_engine.metrics.AllocationMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,7 +43,7 @@ public class ReservationExpiryJob {
             int expired = expireStale();
             int confirmed = recoverPaid();
             if (expired > 0 || confirmed > 0) {
-                log.info("Checkout cleanup: expired {} stale reservation(s), confirmed {} stuck paid order(s)", expired, confirmed);
+                OrderEvents.reservationsCleanedUp(expired, confirmed);
             }
         } catch (RuntimeException e) {
             log.error("Checkout cleanup failed, will retry on the next run", e);

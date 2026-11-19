@@ -1,6 +1,8 @@
 package com.chamani.order_allocation_engine.saga;
 
 import com.chamani.order_allocation_engine.exception.IdempotencyKeyReusedException;
+import com.chamani.order_allocation_engine.logging.OrderEvents;
+import com.chamani.order_allocation_engine.logging.OrderMdc;
 import com.chamani.order_allocation_engine.metrics.AllocationMetrics;
 import com.chamani.order_allocation_engine.model.Order;
 import com.chamani.order_allocation_engine.model.OrderStatus;
@@ -9,8 +11,6 @@ import com.chamani.order_allocation_engine.payment.PaymentResult;
 import com.chamani.order_allocation_engine.payment.PaymentTimeoutException;
 import com.chamani.order_allocation_engine.repository.OrderRepository;
 import com.chamani.order_allocation_engine.service.RequestHash;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
@@ -25,8 +25,6 @@ import java.util.UUID;
  */
 @Service
 public class CheckoutOrchestrator {
-
-    private static final Logger log = LoggerFactory.getLogger(CheckoutOrchestrator.class);
 
     private final CheckoutSteps steps;
     private final PaymentGateway paymentGateway;
@@ -60,26 +58,34 @@ public class CheckoutOrchestrator {
             reservation = steps.reserve(itemId, quantity, idempotencyKey, requestHash);
         } catch (DataIntegrityViolationException e) {
             // A concurrent request with the same key inserted its order first; ours rolled back, nothing is reserved.
-            log.info("Idempotency conflict for key {}, returning the stored order", idempotencyKey);
             Order stored = orderRepository.findByIdempotencyKey(idempotencyKey).orElseThrow(() -> e);
+            OrderEvents.idempotentReplay(OrderEvents.FLOW_CHECKOUT, stored.getOrderId());
             return replay(stored, requestHash, idempotencyKey);
         }
         Order order = reservation.order();
         if (order.getStatus() != OrderStatus.RESERVED) {
-            return order;                                    // FAILED: not enough stock
+            OrderEvents.rejected(OrderEvents.FLOW_CHECKOUT, order);        // FAILED: not enough stock
+            return order;
         }
+        try (var ignored = OrderMdc.put(order.getOrderId())) {          // everything the saga logs from here on carries the order id
+            return continueSaga(order, reservation.amount(), idempotencyKey);
+        }
+    }
+
+    /** Steps 2 and 3: charge, then confirm or compensate. The order is RESERVED and its id is in the log context. */
+    private Order continueSaga(Order order, BigDecimal amount, String idempotencyKey) {
         UUID orderId = order.getOrderId();
 
         // 2. Charge. NO transaction and no row lock is open here.
         PaymentResult result;
         try {
-            result = paymentGateway.charge(orderId, reservation.amount(), idempotencyKey);
+            result = paymentGateway.charge(orderId, amount, idempotencyKey);
         } catch (PaymentTimeoutException e) {
             // 3c. Unknown whether the charge happened. Refunding is safe: the gateway dedupes on the key,
             // so refunding a key that was never charged does nothing.
-            log.warn("Payment timed out for order {}, refunding and compensating", orderId);
             paymentGateway.refund(idempotencyKey);
             metrics.refund();
+            OrderEvents.refunded(order, AllocationMetrics.REASON_TIMEOUT);
             return compensate(orderId, CheckoutOutcomes.REASON_TIMEOUT, AllocationMetrics.REASON_TIMEOUT);
         }
 
@@ -91,12 +97,15 @@ public class CheckoutOrchestrator {
         // 3a. Approved. Lock the order and see whether it is still ours.
         if (steps.recordPayment(orderId, result.paymentId()) == CheckoutSteps.PaymentRecording.TOO_LATE) {
             // The expiry job released the stock while the payment was in flight: give the money back.
-            log.warn("Order {} expired while its payment was in flight, refunding", orderId);
             paymentGateway.refund(idempotencyKey);
             metrics.refund();
-            return steps.recordRefund(orderId);
+            Order refunded = steps.recordRefund(orderId);
+            OrderEvents.refunded(refunded, AllocationMetrics.REASON_EXPIRED);
+            return refunded;
         }
-        return steps.confirm(orderId);
+        Order confirmed = steps.confirm(orderId);
+        OrderEvents.allocated(OrderEvents.FLOW_CHECKOUT, confirmed);
+        return confirmed;
     }
 
     /** Counts the compensation only if THIS call cancelled the order (the expiry job may have expired it first and counted it). */
@@ -104,14 +113,17 @@ public class CheckoutOrchestrator {
         Order order = steps.compensate(orderId, reason);
         if (order.getStatus() == OrderStatus.CANCELLED) {
             metrics.compensation(metricReason);
+            OrderEvents.compensated(order, metricReason);
         }
         return order;
     }
 
     private Order replay(Order stored, String requestHash, String idempotencyKey) {
-        if (!stored.matchesRequestHash(requestHash)) {
-            throw new IdempotencyKeyReusedException(idempotencyKey);
+        try (var ignored = OrderMdc.put(stored.getOrderId())) {   // the order was loaded: its id is the context of anything logged here
+            if (!stored.matchesRequestHash(requestHash)) {
+                throw new IdempotencyKeyReusedException(idempotencyKey);
+            }
+            return stored;
         }
-        return stored;
     }
 }

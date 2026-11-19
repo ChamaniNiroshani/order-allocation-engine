@@ -28,9 +28,16 @@ class SagaDeclinedScenarioTest extends AbstractSagaScenarioTest {
         double refunds = counter("saga.refunds");
         double rejected = counter("allocation.requests", "flow", "checkout", "outcome", "rejected");
 
-        checkout(itemId, 4, key)
-                .andExpect(status().isPaymentRequired())
-                .andExpect(jsonPath("$.status").value("CANCELLED"));
+        try (LogCapture logs = new LogCapture()) {
+            checkout(itemId, 4, key)
+                    .andExpect(status().isPaymentRequired())
+                    .andExpect(jsonPath("$.status").value("CANCELLED"));
+
+            assertEquals(java.util.List.of("order.compensated"), logs.eventNames(), "a decline is compensated, and nothing was charged to refund");
+            var event = logs.events("order.compensated").get(0);
+            assertEquals("declined", LogCapture.field(event, "why"));
+            assertEquals(order(key).getOrderId().toString(), LogCapture.mdc(event).get("orderId"), "the order id is in the log context");
+        }
 
         assertEquals(declined + 1, counter("saga.compensations", "reason", "declined"), "one compensation, for a decline");
         assertEquals(refunds, counter("saga.refunds"), "nothing was charged, so nothing is refunded");

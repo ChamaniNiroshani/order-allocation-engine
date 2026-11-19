@@ -25,10 +25,19 @@ class SagaTimeoutScenarioTest extends AbstractSagaScenarioTest {
         double refunds = counter("saga.refunds");
         double errors = counter("allocation.requests", "flow", "checkout", "outcome", "error");
 
-        checkout(itemId, 4, key)
-                .andExpect(status().isBadGateway())
-                .andExpect(jsonPath("$.status").value("CANCELLED"))
-                .andExpect(jsonPath("$.reason").value("Payment timed out"));
+        try (LogCapture logs = new LogCapture()) {
+            checkout(itemId, 4, key)
+                    .andExpect(status().isBadGateway())
+                    .andExpect(jsonPath("$.status").value("CANCELLED"))
+                    .andExpect(jsonPath("$.reason").value("Payment timed out"));
+
+            assertEquals(java.util.List.of("payment.refunded", "order.compensated"), logs.eventNames());
+            assertEquals("timeout", LogCapture.field(logs.events("payment.refunded").get(0), "why"));
+            assertEquals("timeout", LogCapture.field(logs.events("order.compensated").get(0), "why"));
+            for (var event : java.util.List.of(logs.events("payment.refunded").get(0), logs.events("order.compensated").get(0))) {
+                assertEquals(order(key).getOrderId().toString(), LogCapture.mdc(event).get("orderId"), "the order id is in the log context");
+            }
+        }
 
         var order = order(key);
         assertEquals("CANCELLED", order.getStatus().name());

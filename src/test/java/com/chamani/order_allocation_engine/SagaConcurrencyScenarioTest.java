@@ -137,9 +137,15 @@ class SagaConcurrencyScenarioTest extends AbstractSagaScenarioTest {
         double refunds = counter("saga.refunds");
         double cancelledCompensations = counter("saga.compensations", "reason", "declined") + counter("saga.compensations", "reason", "timeout");
 
-        checkout(itemId, 4, key)
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.status").value("EXPIRED"));
+        try (LogCapture logs = new LogCapture()) {
+            checkout(itemId, 4, key)
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.status").value("EXPIRED"));
+
+            assertEquals(java.util.List.of("payment.refunded"), logs.eventNames(),
+                    "the late payment is refunded; no compensation event, because the job already expired the order");
+            assertEquals("expired", LogCapture.field(logs.events("payment.refunded").get(0), "why"));
+        }
 
         assertEquals(expired + 1, counter("saga.compensations", "reason", "expired"), "counted once, by the job");
         assertEquals(refunds + 1, counter("saga.refunds"), "the late payment was refunded");

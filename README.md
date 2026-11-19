@@ -27,6 +27,16 @@ transaction/audit trail.
    directly.
 3. The API is available at `http://localhost:8080`.
 
+## Logs
+
+Locally the logs are readable text; every line carries `req=<request id>` (the `X-Request-Id` header, or a generated
+one, returned in the response) and, inside an order, `order=<order id>`. SQL is not logged by default.
+
+| Profile | Effect |
+|---|---|
+| `dev` | print every SQL statement (`--spring.profiles.active=dev`) |
+| `json` or `prod` | one JSON object per line (Elastic Common Schema), with `requestId`, `orderId`, `trace.id` and the business event fields |
+
 ## Metrics and dashboards
 
 `docker compose up -d` also starts Prometheus and Grafana (images pinned in `compose.yaml`).
