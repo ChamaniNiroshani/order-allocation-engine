@@ -121,6 +121,18 @@ public class Order {
         this.failureReason = reason;
     }
 
+    /**
+     * A payment that arrived after the order was cancelled or expired was given back. Not a status
+     * change: it only records the refund in the reason.
+     */
+    public void recordRefund() {
+        if (status != OrderStatus.EXPIRED && status != OrderStatus.CANCELLED) {
+            throw new IllegalStateException("Only an expired or cancelled order can record a refund, was " + status);
+        }
+        this.failureReason = (failureReason == null || failureReason.isBlank() ? "" : failureReason + "; ") + "payment refunded";
+        this.updatedAt = Instant.now();
+    }
+
     /** Saga: RESERVED -> EXPIRED (reservation ran out of time). */
     public void expire() {
         transitionTo(OrderStatus.EXPIRED);
