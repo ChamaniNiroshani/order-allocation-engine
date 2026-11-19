@@ -58,9 +58,10 @@ function Get-Retries {
 
 function Start-App([string]$mode) {
     $log = Join-Path $resultsDir "app-$mode.log"
-    # show-sql is turned off here: logging every statement would dominate the numbers.
+    # Things that would dominate or distort the numbers are turned off: SQL logging, tracing (every request would be a
+    # trace, exported), and the one INFO line per order the business events write.
     $p = Start-Process -FilePath $java `
-        -ArgumentList @('-jar', $jar, "--allocation.locking-mode=$mode", '--spring.jpa.show-sql=false') `
+        -ArgumentList @('-jar', $jar, "--allocation.locking-mode=$mode", '--spring.jpa.show-sql=false', '--management.tracing.enabled=false', '--logging.level.com.chamani.order_allocation_engine.logging.OrderEvents=WARN') `
         -RedirectStandardOutput $log -RedirectStandardError "$log.err" -PassThru -WindowStyle Hidden
     for ($i = 0; $i -lt 90; $i++) {
         if ($p.HasExited) { throw "App exited during startup, see $log" }

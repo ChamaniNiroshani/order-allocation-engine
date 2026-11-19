@@ -62,6 +62,18 @@ services:
       - prometheus
     restart: unless-stopped
 
+  # Distributed tracing UI and collector (Jaeger v2). The app sends spans to OTLP/HTTP on 4318; look at them on 16686.
+  # Traces are kept in memory only: they are gone when the container restarts.
+  jaeger:
+    image: jaegertracing/jaeger:2.23.0
+    container_name: oae-jaeger
+    labels:
+      org.springframework.boot.readiness.disable: "true"
+    ports:
+      - "16686:16686"   # UI and query API
+      - "4318:4318"     # OTLP over HTTP (what the app uses)
+    restart: unless-stopped
+
 volumes:
   oae-pgdata:
   oae-prometheus-data:
