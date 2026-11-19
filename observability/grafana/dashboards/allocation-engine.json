@@ -89,7 +89,7 @@
       "id": 2,
       "type": "timeseries",
       "title": "Latency p50 / p95 / p99",
-      "description": "histogram_quantile over allocation_latency_seconds_bucket (all flows, all outcomes), 1m window.",
+      "description": "histogram_quantile over allocation_latency_seconds_bucket (all flows, all outcomes), 1m window. Red line: SLO-1, p99 under 200 ms (docs/slo.md).",
       "gridPos": {
         "x": 12,
         "y": 0,
@@ -113,12 +113,28 @@
             "stacking": {
               "mode": "none",
               "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "line"
             }
           },
           "color": {
             "mode": "palette-classic"
           },
-          "min": 0
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.2
+              }
+            ]
+          }
         },
         "overrides": []
       },
@@ -176,7 +192,7 @@
       "id": 3,
       "type": "timeseries",
       "title": "Real error rate (5xx only)",
-      "description": "Share of /api requests that ended in a 5xx. 409 (no stock) and 402 (payment declined) are correct answers and are NOT errors.",
+      "description": "Share of /api requests that ended in a 5xx. 409 (no stock) and 402 (payment declined) are correct answers and are NOT errors. Red line: SLO-2, at most 0.1% (docs/slo.md).",
       "gridPos": {
         "x": 0,
         "y": 8,
@@ -200,12 +216,28 @@
             "stacking": {
               "mode": "none",
               "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "line"
             }
           },
           "color": {
             "mode": "palette-classic"
           },
-          "min": 0
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.001
+              }
+            ]
+          }
         },
         "overrides": []
       },

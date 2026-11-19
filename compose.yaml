@@ -32,6 +32,7 @@ services:
       - "9090:9090"
     volumes:
       - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
       - oae-prometheus-data:/prometheus
     extra_hosts:
       - "host.docker.internal:host-gateway"   # already defined on Docker Desktop; needed on Linux so the host app is reachable

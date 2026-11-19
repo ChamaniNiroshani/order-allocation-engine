@@ -3,6 +3,10 @@ global:
   scrape_interval: 5s        # fast on purpose: dashboards react within a few seconds during a load test
   evaluation_interval: 5s
 
+# SLO alerts (docs/slo.md). Prometheus evaluates them; there is no Alertmanager, so they show up on the Alerts page.
+rule_files:
+  - /etc/prometheus/alerts.yml
+
 scrape_configs:
   - job_name: order-allocation-engine
     metrics_path: /actuator/prometheus

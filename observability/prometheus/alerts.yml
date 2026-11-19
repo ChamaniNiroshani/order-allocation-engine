@@ -1,0 +1,33 @@
+# Alert rules for the two SLOs in docs/slo.md. Loaded by prometheus.yml (rule_files).
+# Only /api/* requests count; 409 (no stock) and 402 (payment declined) are correct answers, never errors.
+groups:
+  - name: allocation-engine-slo
+    rules:
+      # SLO-1: 99% of allocation requests complete in under 200 ms.
+      - alert: AllocationLatencyHigh
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le) (rate(allocation_latency_seconds_bucket[1m]))
+          ) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+          slo: latency
+        annotations:
+          summary: "Allocation p99 latency is above the 200 ms SLO"
+          description: "p99 has been {{ $value | humanizeDuration }} for 5 minutes (SLO-1: under 200 ms). See docs/slo.md."
+
+      # SLO-2: 99.9% of requests are not 5xx.
+      - alert: AllocationErrorRateHigh
+        expr: |
+          sum(rate(http_server_requests_seconds_count{uri=~"/api/.*", status=~"5.."}[1m]))
+          /
+          sum(rate(http_server_requests_seconds_count{uri=~"/api/.*"}[1m]))
+          > 0.001
+        for: 5m
+        labels:
+          severity: warning
+          slo: availability
+        annotations:
+          summary: "More than 0.1% of API requests are failing with a 5xx"
+          description: "{{ $value | humanizePercentage }} of requests have been 5xx for 5 minutes (SLO-2: at most 0.1%). See docs/slo.md."
