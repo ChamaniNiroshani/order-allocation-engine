@@ -111,8 +111,11 @@ class SagaConcurrencyScenarioTest extends AbstractSagaScenarioTest {
         assertStock(itemId, 6, 4);
         jdbc.update("UPDATE orders SET reserved_at = now() - interval '10 minutes' WHERE order_id = ?", orderId);
 
+        double expired = counter("saga.compensations", "reason", "expired");
+
         job.expireStale();
 
+        assertEquals(expired + 1, counter("saga.compensations", "reason", "expired"), "the job counts what it expired");
         assertEquals(OrderStatus.EXPIRED, order(key).getStatus());
         assertStock(itemId, 10, 0);
         assertEquals(List.of("PENDING->RESERVED", "RESERVED->EXPIRED"), actions(orderId));
@@ -130,9 +133,18 @@ class SagaConcurrencyScenarioTest extends AbstractSagaScenarioTest {
             return invocation.callRealMethod();                       // the payment itself still succeeds
         }).when(spiedGateway).charge(any(), any(), eq(key));
 
+        double expired = counter("saga.compensations", "reason", "expired");
+        double refunds = counter("saga.refunds");
+        double cancelledCompensations = counter("saga.compensations", "reason", "declined") + counter("saga.compensations", "reason", "timeout");
+
         checkout(itemId, 4, key)
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.status").value("EXPIRED"));
+
+        assertEquals(expired + 1, counter("saga.compensations", "reason", "expired"), "counted once, by the job");
+        assertEquals(refunds + 1, counter("saga.refunds"), "the late payment was refunded");
+        assertEquals(cancelledCompensations, counter("saga.compensations", "reason", "declined") + counter("saga.compensations", "reason", "timeout"),
+                "the saga must not count a compensation the job already made");
 
         var order = order(key);
         assertEquals(OrderStatus.EXPIRED, order.getStatus());

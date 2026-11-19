@@ -47,3 +47,14 @@ the `409` rejection path. Use a large `STOCK` (for example `-e STOCK=100000000`)
 
 `handleSummary()` writes `load-tests/results/<script>-<mode>-<vus>vus-<timestamp>.json` and prints the
 normal text summary. `load-tests/results/` is git-ignored: raw results are never committed.
+
+## Smoke test (both flows, for metrics and dashboards)
+
+`smoke.js` sends half its requests to `POST /api/orders` and half to `POST /api/checkout`, over 20 small items.
+It has no pass/fail thresholds and is not a benchmark: it puts traffic on `/actuator/prometheus` and the dashboards.
+Start the app with some payment failures to see declines (402), timeouts (502) and compensations:
+
+```powershell
+java -jar target\order-allocation-engine-0.0.1-SNAPSHOT.jar --payment.fake.failure-rate=0.2 --payment.fake.timeout-rate=0.05
+docker run --rm -i -v "${PWD}/load-tests:/scripts" -e VUS=10 -e DURATION=20s grafana/k6 run --quiet /scripts/smoke.js
+```

@@ -24,10 +24,17 @@ class SagaDeclinedScenarioTest extends AbstractSagaScenarioTest {
     void declined_returns402_cancelsTheOrder_restoresTheStock_andNothingIsCharged() throws Exception {
         UUID itemId = newItem(10);
         String key = newKey();
+        double declined = counter("saga.compensations", "reason", "declined");
+        double refunds = counter("saga.refunds");
+        double rejected = counter("allocation.requests", "flow", "checkout", "outcome", "rejected");
 
         checkout(itemId, 4, key)
                 .andExpect(status().isPaymentRequired())
                 .andExpect(jsonPath("$.status").value("CANCELLED"));
+
+        assertEquals(declined + 1, counter("saga.compensations", "reason", "declined"), "one compensation, for a decline");
+        assertEquals(refunds, counter("saga.refunds"), "nothing was charged, so nothing is refunded");
+        assertEquals(rejected + 1, counter("allocation.requests", "flow", "checkout", "outcome", "rejected"), "402 is a correct answer, not an error");
 
         var order = order(key);
         assertEquals("CANCELLED", order.getStatus().name());
@@ -42,9 +49,12 @@ class SagaDeclinedScenarioTest extends AbstractSagaScenarioTest {
         UUID itemId = newItem(10);
         String key = newKey();
 
+        double declined = counter("saga.compensations", "reason", "declined");
+
         checkout(itemId, 4, key).andExpect(status().isPaymentRequired());
         checkout(itemId, 4, key).andExpect(status().isPaymentRequired());
 
+        assertEquals(declined + 1, counter("saga.compensations", "reason", "declined"), "the replay compensates nothing");
         assertEquals(1, ordersWithKey(key));
         assertEquals(2, actions(order(key).getOrderId()).size(), "the retry must not write another transition");
         assertStock(itemId, 10, 0);

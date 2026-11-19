@@ -1,5 +1,6 @@
 package com.chamani.order_allocation_engine.saga;
 
+import com.chamani.order_allocation_engine.metrics.AllocationMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -23,10 +24,13 @@ public class ReservationExpiryJob {
 
     private final ReservationExpiryService service;
     private final CheckoutProperties properties;
+    private final AllocationMetrics metrics;
 
-    public ReservationExpiryJob(ReservationExpiryService service, CheckoutProperties properties) {
+    public ReservationExpiryJob(ReservationExpiryService service, CheckoutProperties properties,
+                                AllocationMetrics metrics) {
         this.service = service;
         this.properties = properties;
+        this.metrics = metrics;
     }
 
     @Scheduled(fixedDelayString = "${checkout.expiry.interval:30s}", initialDelayString = "${checkout.expiry.interval:30s}")
@@ -47,7 +51,11 @@ public class ReservationExpiryJob {
 
     /** Expires every RESERVED order older than the TTL, one batch (one transaction) at a time. */
     public int expireStale() {
-        return drain(service::expireBatch);
+        return drain((cutoff, batchSize) -> {
+            int expired = service.expireBatch(cutoff, batchSize);       // committed by now
+            metrics.compensation(AllocationMetrics.REASON_EXPIRED, expired);
+            return expired;
+        });
     }
 
     /** Confirms every PAID order older than the TTL (charged, never confirmed). */

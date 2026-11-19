@@ -1,6 +1,7 @@
 package com.chamani.order_allocation_engine.saga;
 
 import com.chamani.order_allocation_engine.exception.IdempotencyKeyReusedException;
+import com.chamani.order_allocation_engine.metrics.AllocationMetrics;
 import com.chamani.order_allocation_engine.model.Order;
 import com.chamani.order_allocation_engine.model.OrderStatus;
 import com.chamani.order_allocation_engine.payment.PaymentGateway;
@@ -30,14 +31,21 @@ public class CheckoutOrchestrator {
     private final CheckoutSteps steps;
     private final PaymentGateway paymentGateway;
     private final OrderRepository orderRepository;
+    private final AllocationMetrics metrics;
 
-    public CheckoutOrchestrator(CheckoutSteps steps, PaymentGateway paymentGateway, OrderRepository orderRepository) {
+    public CheckoutOrchestrator(CheckoutSteps steps, PaymentGateway paymentGateway, OrderRepository orderRepository,
+                                AllocationMetrics metrics) {
         this.steps = steps;
         this.paymentGateway = paymentGateway;
         this.orderRepository = orderRepository;
+        this.metrics = metrics;
     }
 
     public Order checkout(UUID itemId, int quantity, String idempotencyKey) {
+        return metrics.measure(AllocationMetrics.Flow.CHECKOUT, () -> run(itemId, quantity, idempotencyKey));
+    }
+
+    private Order run(UUID itemId, int quantity, String idempotencyKey) {
         String requestHash = RequestHash.of(itemId, quantity);
 
         // 0. Idempotency: a known key returns its stored order as-is. No new reservation, no new charge.
@@ -71,12 +79,13 @@ public class CheckoutOrchestrator {
             // so refunding a key that was never charged does nothing.
             log.warn("Payment timed out for order {}, refunding and compensating", orderId);
             paymentGateway.refund(idempotencyKey);
-            return steps.compensate(orderId, CheckoutOutcomes.REASON_TIMEOUT);
+            metrics.refund();
+            return compensate(orderId, CheckoutOutcomes.REASON_TIMEOUT, AllocationMetrics.REASON_TIMEOUT);
         }
 
         if (!result.isApproved()) {
             // 3b. Declined: nothing was charged, give the stock back.
-            return steps.compensate(orderId, CheckoutOutcomes.REASON_DECLINED + ": " + result.reason());
+            return compensate(orderId, CheckoutOutcomes.REASON_DECLINED + ": " + result.reason(), AllocationMetrics.REASON_DECLINED);
         }
 
         // 3a. Approved. Lock the order and see whether it is still ours.
@@ -84,9 +93,19 @@ public class CheckoutOrchestrator {
             // The expiry job released the stock while the payment was in flight: give the money back.
             log.warn("Order {} expired while its payment was in flight, refunding", orderId);
             paymentGateway.refund(idempotencyKey);
+            metrics.refund();
             return steps.recordRefund(orderId);
         }
         return steps.confirm(orderId);
+    }
+
+    /** Counts the compensation only if THIS call cancelled the order (the expiry job may have expired it first and counted it). */
+    private Order compensate(UUID orderId, String reason, String metricReason) {
+        Order order = steps.compensate(orderId, reason);
+        if (order.getStatus() == OrderStatus.CANCELLED) {
+            metrics.compensation(metricReason);
+        }
+        return order;
     }
 
     private Order replay(Order stored, String requestHash, String idempotencyKey) {

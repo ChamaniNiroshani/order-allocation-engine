@@ -21,6 +21,9 @@ class SagaTimeoutScenarioTest extends AbstractSagaScenarioTest {
     void timeout_returns502_refunds_cancelsTheOrder_andRestoresTheStock() throws Exception {
         UUID itemId = newItem(10);
         String key = newKey();
+        double timeouts = counter("saga.compensations", "reason", "timeout");
+        double refunds = counter("saga.refunds");
+        double errors = counter("allocation.requests", "flow", "checkout", "outcome", "error");
 
         checkout(itemId, 4, key)
                 .andExpect(status().isBadGateway())
@@ -33,6 +36,9 @@ class SagaTimeoutScenarioTest extends AbstractSagaScenarioTest {
         assertEquals(List.of("PENDING->RESERVED", "RESERVED->CANCELLED"), actions(order.getOrderId()));
         assertEquals(1, gateway.refundCallCount(key), "the saga must call refund after a timeout");
         assertEquals(gateway.chargeCount(key), gateway.refundCount(key), "whatever was charged was given back");
+        assertEquals(timeouts + 1, counter("saga.compensations", "reason", "timeout"));
+        assertEquals(refunds + 1, counter("saga.refunds"));
+        assertEquals(errors + 1, counter("allocation.requests", "flow", "checkout", "outcome", "error"), "502 is counted as an error");
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.chamani.order_allocation_engine.service;
 
 import com.chamani.order_allocation_engine.concurrency.OptimisticRetryExecutor;
 import com.chamani.order_allocation_engine.exception.IdempotencyKeyReusedException;
+import com.chamani.order_allocation_engine.metrics.AllocationMetrics;
 import com.chamani.order_allocation_engine.model.Order;
 import com.chamani.order_allocation_engine.repository.OrderRepository;
 import org.slf4j.Logger;
@@ -25,15 +26,21 @@ public class OrderAllocationFacade {
     private final AllocationService allocationService;
     private final OrderRepository orderRepository;
     private final OptimisticRetryExecutor optimisticRetry;
+    private final AllocationMetrics metrics;
 
     public OrderAllocationFacade(AllocationService allocationService, OrderRepository orderRepository,
-                                 OptimisticRetryExecutor optimisticRetry) {
+                                 OptimisticRetryExecutor optimisticRetry, AllocationMetrics metrics) {
         this.allocationService = allocationService;
         this.orderRepository = orderRepository;
         this.optimisticRetry = optimisticRetry;
+        this.metrics = metrics;
     }
 
     public Order allocate(UUID itemId, Integer quantityRequested, String idempotencyKey) {
+        return metrics.measure(AllocationMetrics.Flow.DIRECT, () -> doAllocate(itemId, quantityRequested, idempotencyKey));
+    }
+
+    private Order doAllocate(UUID itemId, Integer quantityRequested, String idempotencyKey) {
         try {
             // Each attempt is a fresh transaction through the AllocationService proxy. A no-op
             // unless the optimistic strategy loses a version race.
