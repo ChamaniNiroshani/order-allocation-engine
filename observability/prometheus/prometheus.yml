@@ -1,0 +1,13 @@
+# Prometheus for local development.
+global:
+  scrape_interval: 5s        # fast on purpose: dashboards react within a few seconds during a load test
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: order-allocation-engine
+    metrics_path: /actuator/prometheus
+    static_configs:
+      # The app runs on the HOST (java -jar / IDE), so Prometheus, inside Docker, reaches it through
+      # host.docker.internal. This changes in OAE-29, when the app itself becomes a compose service
+      # and the target becomes its service name (e.g. app:8080).
+      - targets: ["host.docker.internal:8080"]

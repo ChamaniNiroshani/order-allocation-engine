@@ -27,6 +27,20 @@ transaction/audit trail.
    directly.
 3. The API is available at `http://localhost:8080`.
 
+## Metrics and dashboards
+
+`docker compose up -d` also starts Prometheus and Grafana (images pinned in `compose.yaml`).
+With the app running on the host:
+
+| What | URL |
+|---|---|
+| Grafana dashboard "Allocation Engine" (no login to view) | http://localhost:3000/d/allocation-engine/allocation-engine |
+| Prometheus (targets: Status > Targets) | http://localhost:9090 |
+| Raw metrics the app exposes | http://localhost:8080/actuator/prometheus |
+
+`load-tests/smoke.js` puts traffic on both flows (see `load-tests/README.md`). The Grafana admin password is
+`GRAFANA_ADMIN_PASSWORD` (default `admin`, for local use only).
+
 ## Run the tests
 
 ```bash
