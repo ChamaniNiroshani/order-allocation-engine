@@ -42,4 +42,6 @@ build/
 ### Local secrets ###
 .env
 
+document/
+
 load-tests/results/
