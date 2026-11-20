@@ -4,6 +4,7 @@ import com.chamani.order_allocation_engine.exception.StockContentionException;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Component;
 
@@ -31,7 +32,13 @@ public class OptimisticRetryExecutor {
     private final Counter retries;
     private final AtomicLong exhausted = new AtomicLong();
 
+    /** Used by Spring: allocation.optimistic.max-attempts (default 5) is how many tries an allocation gets before it gives up with a 503. */
     @Autowired
+    public OptimisticRetryExecutor(@Value("${allocation.optimistic.max-attempts:" + DEFAULT_MAX_ATTEMPTS + "}") int maxAttempts,
+                                   MeterRegistry registry) {
+        this(maxAttempts, DEFAULT_BASE_DELAY_MS, registry);
+    }
+
     public OptimisticRetryExecutor(MeterRegistry registry) {
         this(DEFAULT_MAX_ATTEMPTS, DEFAULT_BASE_DELAY_MS, registry);
     }
