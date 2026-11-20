@@ -1,7 +1,10 @@
 package com.chamani.order_allocation_engine;
 
 import com.chamani.order_allocation_engine.exception.IdempotencyKeyReusedException;
+import com.chamani.order_allocation_engine.concurrency.AllocationProperties;
+import com.chamani.order_allocation_engine.concurrency.LockingMode;
 import com.chamani.order_allocation_engine.concurrency.OptimisticRetryExecutor;
+import com.chamani.order_allocation_engine.metrics.AllocationMetrics;
 import com.chamani.order_allocation_engine.model.Order;
 import com.chamani.order_allocation_engine.repository.OrderRepository;
 import com.chamani.order_allocation_engine.service.AllocationService;
@@ -36,6 +39,9 @@ class OrderAllocationFacadeTest {
 
     @Spy
     private OptimisticRetryExecutor optimisticRetry = new OptimisticRetryExecutor(new SimpleMeterRegistry());
+
+    @Spy
+    private AllocationMetrics metrics = new AllocationMetrics(new SimpleMeterRegistry(), new AllocationProperties(LockingMode.PESSIMISTIC));
 
     @InjectMocks
     private OrderAllocationFacade facade;

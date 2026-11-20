@@ -17,5 +17,64 @@ services:
       retries: 10
     restart: unless-stopped
 
+  # ---- Observability (see observability/ and docs/slo.md) ---------------------------------------------------
+  # Spring Boot Docker Compose starts every service in this file when the app starts. These two are not
+  # something the app connects to, so the readiness label stops it from waiting for their ports.
+  prometheus:
+    image: prom/prometheus:v3.16.0
+    container_name: oae-prometheus
+    labels:
+      org.springframework.boot.readiness.disable: "true"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - oae-prometheus-data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # already defined on Docker Desktop; needed on Linux so the host app is reachable
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:13.2.6
+    container_name: oae-grafana
+    labels:
+      org.springframework.boot.readiness.disable: "true"
+    environment:
+      # Local development only: anyone who can reach port 3000 can VIEW dashboards without logging in.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"      # no background download of unused plugins (it burns CPU and needs internet)
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/etc/grafana/dashboards:ro
+      - oae-grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  # Distributed tracing UI and collector (Jaeger v2). The app sends spans to OTLP/HTTP on 4318; look at them on 16686.
+  # Traces are kept in memory only: they are gone when the container restarts.
+  jaeger:
+    image: jaegertracing/jaeger:2.23.0
+    container_name: oae-jaeger
+    labels:
+      org.springframework.boot.readiness.disable: "true"
+    ports:
+      - "16686:16686"   # UI and query API
+      - "4318:4318"     # OTLP over HTTP (what the app uses)
+    restart: unless-stopped
+
 volumes:
   oae-pgdata:
+  oae-prometheus-data:
+  oae-grafana-data:

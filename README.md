@@ -27,6 +27,35 @@ transaction/audit trail.
    directly.
 3. The API is available at `http://localhost:8080`.
 
+## Logs
+
+Locally the logs are readable text; every line carries `req=<request id>` (the `X-Request-Id` header, or a generated
+one, returned in the response), `trace=<trace id>` (the same id Jaeger shows) and, inside an order, `order=<order id>`. SQL is not logged by default.
+
+| Profile | Effect |
+|---|---|
+| `dev` | print every SQL statement (`--spring.profiles.active=dev`) |
+| `json` or `prod` | one JSON object per line (Elastic Common Schema), with `requestId`, `orderId`, `traceId`, `spanId` and the business event fields |
+
+## Metrics, dashboards and traces
+
+`docker compose up -d` also starts Prometheus, Grafana and Jaeger (images pinned in `compose.yaml`).
+With the app running on the host:
+
+| What | URL |
+|---|---|
+| Grafana dashboard "Allocation Engine" (no login to view) | http://localhost:3000/d/allocation-engine/allocation-engine |
+| Prometheus (targets: Status > Targets) | http://localhost:9090 |
+| Raw metrics the app exposes | http://localhost:8080/actuator/prometheus |
+| Jaeger, traces (service `order-allocation-engine`) | http://localhost:16686 |
+
+Every request is traced (HTTP, then each saga step, the payment gateway call and the SQL under it) and sent to Jaeger
+over OTLP, sampling 100% locally (`management.tracing.sampling.probability`). Without Jaeger running the app still works,
+but the exporter logs an ERROR ("Failed to export spans") each time it tries to send a batch. Tracing is off in the tests and in `load-tests/run-matrix.ps1`.
+
+`load-tests/smoke.js` puts traffic on both flows (see `load-tests/README.md`). The Grafana admin password is
+`GRAFANA_ADMIN_PASSWORD` (default `admin`, for local use only).
+
 ## Run the tests
 
 ```bash

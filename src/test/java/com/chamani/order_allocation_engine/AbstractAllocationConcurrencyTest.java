@@ -1,6 +1,7 @@
 package com.chamani.order_allocation_engine;
 
 import com.chamani.order_allocation_engine.exception.IdempotencyKeyReusedException;
+import com.chamani.order_allocation_engine.exception.StockContentionException;
 import com.chamani.order_allocation_engine.model.InventoryItem;
 import com.chamani.order_allocation_engine.model.Order;
 import com.chamani.order_allocation_engine.model.OrderStatus;
@@ -55,6 +56,16 @@ abstract class AbstractAllocationConcurrencyTest {
                 Integer.class, itemId);
     }
 
+    /**
+     * Whether giving up under contention (StockContentionException, HTTP 503 + Retry-After) is a valid outcome for
+     * this strategy. Only the optimistic strategy retries a bounded number of times by design and then gives up
+     * instead of queueing on a lock, so under a 20-way race on one row a few requests may legitimately run out of
+     * retries. Pessimistic and atomic-update never give up: for them contention must stay zero.
+     */
+    protected boolean contentionIsValidOutcome() {
+        return false;
+    }
+
     @Test
     void hotItem_neverOversells_andKeepsStockInvariant() throws Exception {
         final int stock = 100;
@@ -69,6 +80,7 @@ abstract class AbstractAllocationConcurrencyTest {
 
         AtomicInteger allocated = new AtomicInteger();
         AtomicInteger rejected = new AtomicInteger();
+        AtomicInteger contention = new AtomicInteger();
         AtomicInteger unexpected = new AtomicInteger();
 
         List<Future<?>> futures = new ArrayList<>();
@@ -87,6 +99,8 @@ abstract class AbstractAllocationConcurrencyTest {
                     } else {
                         unexpected.incrementAndGet();
                     }
+                } catch (StockContentionException e) {
+                    contention.incrementAndGet();      // retries exhausted: the caller is told to retry later
                 } catch (Exception e) {
                     unexpected.incrementAndGet();
                     e.printStackTrace();
@@ -103,10 +117,16 @@ abstract class AbstractAllocationConcurrencyTest {
 
         int remaining = inventoryItemRepository.findById(itemId).orElseThrow().getQuantityAvailable();
 
-        assertEquals(0, unexpected.get(), "no request may fail with an unexpected error (e.g. lock conflicts)");
-        assertEquals(stock / quantityPerOrder, allocated.get(), "exactly 10 orders should be allocated");
-        assertEquals(requests - allocated.get(), rejected.get(), "all other requests should be rejected for insufficient stock");
-        assertEquals(0, remaining, "stock must be fully consumed and never negative");
+        assertEquals(0, unexpected.get(), "no request may fail with an unexpected error");
+        assertEquals(requests, allocated.get() + rejected.get() + contention.get(),
+                "every request ends as allocated, rejected for stock, or gave up under contention");
+        if (!contentionIsValidOutcome()) {
+            assertEquals(0, contention.get(), "this strategy never gives up under contention");
+            assertEquals(stock / quantityPerOrder, allocated.get(), "exactly 10 orders should be allocated");
+            assertEquals(0, remaining, "stock must be fully consumed and never negative");
+        }
+        assertTrue(allocated.get() <= stock / quantityPerOrder, "never oversell: at most 10 orders can be allocated");
+        assertTrue(remaining >= 0, "stock must never go negative");
 
         // Invariant: every unit is either allocated or still on the shelf. The DB rows must agree
         // with what the callers were told.

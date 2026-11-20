@@ -6,6 +6,7 @@ import com.chamani.order_allocation_engine.payment.FakePaymentGateway;
 import com.chamani.order_allocation_engine.repository.InventoryItemRepository;
 import com.chamani.order_allocation_engine.repository.OrderRepository;
 import com.chamani.order_allocation_engine.repository.TransactionLogRepository;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -53,6 +54,9 @@ abstract class AbstractSagaScenarioTest {
     @Autowired
     protected JdbcTemplate jdbc;
 
+    @Autowired
+    protected MeterRegistry meterRegistry;
+
     private final Map<UUID, Integer> initialStock = new ConcurrentHashMap<>();
 
     protected UUID newItem(int stock) {
@@ -78,6 +82,11 @@ abstract class AbstractSagaScenarioTest {
 
     protected List<String> actions(UUID orderId) {
         return transactionLogRepository.findByEntityIdOrderByTimestampAsc(orderId).stream().map(l -> l.getAction()).toList();
+    }
+
+    /** Current value of one counter, e.g. counter("saga.compensations", "reason", "declined"). Tests compare before and after. */
+    protected double counter(String name, String... tagKeyValues) {
+        return meterRegistry.get(name).tags(tagKeyValues).counter().count();
     }
 
     protected int ordersWithKey(String key) {

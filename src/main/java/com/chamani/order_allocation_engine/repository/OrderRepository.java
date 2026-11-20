@@ -1,6 +1,7 @@
 package com.chamani.order_allocation_engine.repository;
 
 import com.chamani.order_allocation_engine.model.Order;
+import com.chamani.order_allocation_engine.model.OrderStatus;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
@@ -14,6 +15,8 @@ import java.util.UUID;
 
 public interface OrderRepository extends JpaRepository<Order, UUID> {
     Optional<Order> findByIdempotencyKey(String idempotencyKey);
+
+    long countByStatus(OrderStatus status);
 
     // SELECT ... FOR UPDATE on the order. Every saga step that changes an order's status takes this
     // lock first and then checks the current status, so two actors (the saga, the expiry job) can

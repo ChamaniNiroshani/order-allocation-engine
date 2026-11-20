@@ -4,6 +4,7 @@ import com.chamani.order_allocation_engine.concurrency.AllocationProperties;
 import com.chamani.order_allocation_engine.concurrency.DecrementResult;
 import com.chamani.order_allocation_engine.concurrency.StockDecrementer;
 import com.chamani.order_allocation_engine.exception.IdempotencyKeyReusedException;
+import com.chamani.order_allocation_engine.logging.OrderEvents;
 import com.chamani.order_allocation_engine.model.Allocation;
 import com.chamani.order_allocation_engine.model.Order;
 import com.chamani.order_allocation_engine.model.OrderStatus;
@@ -11,6 +12,8 @@ import com.chamani.order_allocation_engine.repository.AllocationRepository;
 import com.chamani.order_allocation_engine.repository.OrderRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.List;
 import java.util.UUID;
@@ -69,6 +72,7 @@ public class AllocationService {
             order.markFailed("Insufficient inventory: only " + result.available() + " available");
             Order failed = orderRepository.save(order);
             orderAudit.record(failed, before);
+            afterCommit(() -> OrderEvents.rejected(OrderEvents.FLOW_DIRECT, failed));
             return failed;
         }
 
@@ -81,6 +85,21 @@ public class AllocationService {
         Allocation allocation = new Allocation(savedOrder.getOrderId(), itemId, quantityRequested, OrderStatus.ALLOCATED);
         allocationRepository.save(allocation);
 
+        afterCommit(() -> OrderEvents.allocated(OrderEvents.FLOW_DIRECT, savedOrder));
         return savedOrder;
+    }
+
+    /** Business events are logged once the order is really stored: a rolled-back attempt (a retry, a lost race) logs nothing. */
+    private static void afterCommit(Runnable log) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            log.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                log.run();
+            }
+        });
     }
 }
