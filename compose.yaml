@@ -53,9 +53,9 @@ services:
       # curl is part of the eclipse-temurin runtime image, so no extra package is needed
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health/readiness"]
       interval: 5s
-      timeout: 3s
+      timeout: 10s          # generous: on a loaded laptop a probe can be slow without the app being unhealthy
       retries: 12
-      start_period: 40s
+      start_period: 120s
     restart: unless-stopped
 
   # ---- Observability (see observability/ and docs/slo.md) ---------------------------------------------------
