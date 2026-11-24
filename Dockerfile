@@ -5,7 +5,9 @@ FROM eclipse-temurin:21.0.13_9-jdk-noble AS build
 WORKDIR /workspace
 
 # Dependencies in their own layer: only re-downloaded when pom.xml or the wrapper change, not on every code change.
-COPY mvnw pom.xml ./
+# mvnw is committed without the executable bit (it is added from Windows), so set it here instead of relying on the checkout.
+COPY --chmod=755 mvnw ./
+COPY pom.xml ./
 COPY .mvn .mvn
 RUN ./mvnw -B -q dependency:go-offline
 
