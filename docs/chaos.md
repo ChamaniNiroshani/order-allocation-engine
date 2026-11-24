@@ -6,7 +6,7 @@ Two failure experiments against the running system, each done **before** and **a
 | # | Experiment | Script |
 |---|---|---|
 | 1 | Kill PostgreSQL during load | `load-tests/chaos-db.ps1` |
-| 2 | Kill the app in the middle of checkouts | `load-tests/chaos-app.ps1` (added with experiment 2) |
+| 2 | Kill the app in the middle of checkouts | `load-tests/chaos-app.ps1` (k6: `load-tests/checkout.js`) |
 
 > **Read the numbers as indicative.** Everything ran on one Windows laptop that was heavily loaded the whole time
 > (about 100% CPU and under 1 GB free RAM from other programs, Docker Desktop VM with 3.7 GB), with the app, Postgres,
@@ -125,3 +125,79 @@ Hypothesis 4 (data stays correct) **held**; hypotheses 1 and 2 **did not**; hypo
 
 Fixes this points to (OAE-34): lower the Hikari connection timeout so requests fail in seconds; map "database
 unavailable" to 503 + `Retry-After`, logged once at WARN; make readiness fail fast and report DOWN.
+
+---
+
+## 2. Kill the app in the middle of checkouts
+
+### Run: BEFORE fixes (no resilience changes yet)
+
+#### Hypothesis
+
+A checkout reserves stock in one transaction, then calls the payment provider, then confirms in another transaction.
+If the app process dies in between (`kill`, not a graceful stop):
+
+1. the orders that were mid-payment stay RESERVED in the database, with their stock reserved,
+2. after the app restarts, the expiry job finds them and expires them, so **RESERVED returns to 0 with no manual
+   clean-up**, about one reservation TTL (plus the restart) after the kill,
+3. stock returns **exactly** to what it was (`available + reserved + confirmed = initial`, nothing leaked, nothing
+   negative),
+4. any order that was PAID but not yet confirmed at the kill is confirmed by the recovery path.
+
+#### Experiment
+
+- App container with three overrides for this experiment only (container environment, not new defaults):
+  `PAYMENT_FAKE_LATENCY_MS=5000`, `CHECKOUT_RESERVATION_TTL=30s`, `CHECKOUT_EXPIRY_INTERVAL=5s`. With a 5 s payment,
+  every VU is always holding one RESERVED order.
+- Load: `load-tests/checkout.js`, 10 VUs, 20 items x 1000 stock, `POST /api/checkout`.
+- 15 s after the first checkout had completed (about 20 s into the run, when all 10 VUs are mid-payment):
+  `docker compose kill app`. Record RESERVED orders and reserved stock, then `docker compose start app`, and poll the
+  database every ~1 s until nothing is RESERVED or PAID.
+
+#### Observed
+
+| Question | Observed |
+|---|---|
+| At the kill | **RESERVED = 10, PAID = 0**, reserved stock = **10 units** (one unit per order); available 19,950 of 20,000. |
+| What k6 saw | 40 x 201 before the kill; **75 connection errors** (status 0) after it (the 10 in-flight checkouts were cut, then the VUs retried against a dead port). |
+| App back | `start app` issued 2.8 s after the kill; container healthy **18.9 s** after the kill. |
+| **Time until RESERVED = 0** | **31.7 s after the kill** (28.9 s after `start app`, 12.8 s after the container was healthy). The count stayed at 10 until 30.6 s and was 0 at 31.7 s. |
+| Fate of the 10 stuck orders | **EXPIRED = 10** (none confirmed, none cancelled). |
+| Stock | Returned exactly: 20 items, **0 negative**, **0 items** where `available + reserved + allocated/confirmed != 1000`; totals 19,960 available + 0 reserved + 40 confirmed = 20,000 = initial. Reserved stock 10 to 0. |
+| PAID orders left, then confirmed by the recovery path | **None existed**, so this path was **not exercised**. The 5 s delay is inside the payment call, *before* the order is marked PAID; the PAID-to-CONFIRMED window is a few milliseconds and the kill did not land in it. This is covered by the integration tests, not by this experiment. |
+| Orders by status after | CONFIRMED = 40, EXPIRED = 10. |
+
+![Grafana during the app-kill run](img/chaos-app-before.png)
+
+*Grafana, whole run (11:49:22 to 11:51:11). "Active reservations" rises to 10, has a gap while the app is dead (nothing
+to scrape), shows 10 again after the restart until the expiry job runs, then drops to 0. "Saga compensations by reason"
+shows `expired` (about 0.17 ops/s as 10 orders were expired in one 5 s window).*
+
+An earlier attempt of this experiment is **not** counted: a timing bug in my script (k6 writes a row only when a request
+finishes, and each checkout takes 5 s) made it kill the app after k6 had already finished, with RESERVED = 0 at the
+kill. It tested nothing; I fixed the script and re-ran.
+
+#### Analysis
+
+Hypotheses 1, 2 and 3 **held**; 4 was **not tested** by this run.
+
+1. **Recovery is automatic and correct.** A crash mid-payment leaves orders RESERVED, but nothing is lost: because the
+   stock reservation and the order status commit together, the stock is reserved if and only if the order is RESERVED,
+   and the expiry job releases both in one transaction. Stock came back exactly.
+2. **How long stock stays locked is set by the TTL, not by the restart.** The app was healthy after 18.9 s but orders
+   were only expired at 31.7 s, because they are only stale 30 s after they were reserved (plus up to one 5 s job
+   interval). With the **default** `checkout.reservation-ttl` of 5 minutes, a crash holds the units of every in-flight
+   checkout for up to 5 minutes. That is a business trade-off (a longer TTL protects slow payments from being expired
+   under them), not a bug, but it is the number to know.
+3. **Open risk this experiment cannot measure: money.** The expiry path releases stock but does **not** call the payment
+   gateway's refund. The fake gateway keeps its state in memory and loses it on restart, so here nothing was charged
+   at all. With a real provider, a charge that succeeded in the instant before the crash would leave an EXPIRED order
+   with a charged customer. A real fix needs a gateway that can be queried (look up the payment by idempotency key
+   before expiring, refund if found); I did not change this because there is no data here that shows it, only the code.
+4. **Not exercised:** the PAID-then-crash path (see the table) and what a client sees when it retries the same
+   `Idempotency-Key` after the restart.
+
+Findings for OAE-34 from this experiment: none that call for a code change by themselves. The gateway call has no
+timeout of the orchestrator's own (a slow payment holds the request, and its reservation, for as long as the gateway
+takes), which is a design gap visible in the code and consistent with the 5 s waits here, but this run did not measure a
+stuck gateway.
