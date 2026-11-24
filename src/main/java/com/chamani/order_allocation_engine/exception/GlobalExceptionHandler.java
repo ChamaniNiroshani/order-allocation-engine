@@ -2,7 +2,9 @@ package com.chamani.order_allocation_engine.exception;
 
 import org.hibernate.exception.JDBCConnectionException;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.MessageSourceResolvable;
 import org.springframework.core.NestedExceptionUtils;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -25,6 +27,7 @@ import java.sql.SQLTransientConnectionException;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -94,6 +97,20 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(HandlerMethodValidationException.class)
     public ResponseEntity<Map<String, Object>> handleMethodValidation(HandlerMethodValidationException ex) {
+        // A controller with a constrained header AND a @Valid body gets BOTH kinds of failure here (Spring's method validation).
+        // A bad header keeps its message; a bad body reports its own first field message instead of blaming the header.
+        boolean headerFailed = ex.getParameterValidationResults().stream()
+                .anyMatch(r -> r.getMethodParameter().hasParameterAnnotation(RequestHeader.class));
+        if (!headerFailed) {
+            var bodyMessage = ex.getParameterValidationResults().stream()
+                    .flatMap(r -> r.getResolvableErrors().stream())
+                    .map(MessageSourceResolvable::getDefaultMessage)
+                    .filter(Objects::nonNull)
+                    .findFirst();
+            if (bodyMessage.isPresent()) {
+                return buildResponse(HttpStatus.BAD_REQUEST, bodyMessage.get());
+            }
+        }
         return buildResponse(HttpStatus.BAD_REQUEST, "Idempotency-Key must not be blank and at most 255 characters");
     }
 
