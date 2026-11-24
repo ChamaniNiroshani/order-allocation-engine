@@ -10,8 +10,16 @@ rule_files:
 scrape_configs:
   - job_name: order-allocation-engine
     metrics_path: /actuator/prometheus
+    # Two ways to run the app, so two targets. Only one of them is up at a time (both use port 8080 on the host):
+    #   run_mode=ide      the app runs on the HOST (IDE / mvnw spring-boot:run / java -jar). Prometheus is inside Docker,
+    #                     so it reaches the host through host.docker.internal.
+    #   run_mode=compose the app runs as the "app" service (docker compose --profile app up), reached by service name.
+    # The dashboard queries filter on the application label and sum across series, so it works in both modes. The
+    # target that is not running shows as DOWN on Status > Targets; that is expected, not a fault.
     static_configs:
-      # The app runs on the HOST (java -jar / IDE), so Prometheus, inside Docker, reaches it through
-      # host.docker.internal. This changes in OAE-29, when the app itself becomes a compose service
-      # and the target becomes its service name (e.g. app:8080).
       - targets: ["host.docker.internal:8080"]
+        labels:
+          run_mode: ide
+      - targets: ["app:8080"]
+        labels:
+          run_mode: compose
