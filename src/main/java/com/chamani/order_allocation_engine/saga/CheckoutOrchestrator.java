@@ -7,17 +7,26 @@ import com.chamani.order_allocation_engine.metrics.AllocationMetrics;
 import com.chamani.order_allocation_engine.model.Order;
 import com.chamani.order_allocation_engine.model.OrderStatus;
 import com.chamani.order_allocation_engine.payment.PaymentGateway;
+import com.chamani.order_allocation_engine.payment.PaymentProperties;
 import com.chamani.order_allocation_engine.payment.PaymentResult;
 import com.chamani.order_allocation_engine.payment.PaymentTimeoutException;
 import com.chamani.order_allocation_engine.repository.OrderRepository;
 import com.chamani.order_allocation_engine.service.RequestHash;
 import io.micrometer.observation.Observation;
 import io.micrometer.observation.ObservationRegistry;
+import jakarta.annotation.PreDestroy;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
 
 /**
@@ -49,14 +58,47 @@ public class CheckoutOrchestrator {
     private final OrderRepository orderRepository;
     private final AllocationMetrics metrics;
     private final ObservationRegistry observations;
+    private final Duration paymentTimeout;
+    /** Runs the charge call so the saga can stop waiting for it. One cheap virtual thread per call. */
+    private final ExecutorService paymentCalls = Executors.newVirtualThreadPerTaskExecutor();
 
     public CheckoutOrchestrator(CheckoutSteps steps, PaymentGateway paymentGateway, OrderRepository orderRepository,
-                                AllocationMetrics metrics, ObservationRegistry observations) {
+                                AllocationMetrics metrics, ObservationRegistry observations, PaymentProperties paymentProperties) {
         this.steps = steps;
         this.paymentGateway = paymentGateway;
         this.orderRepository = orderRepository;
         this.metrics = metrics;
         this.observations = observations;
+        this.paymentTimeout = paymentProperties.timeout();
+    }
+
+    @PreDestroy
+    void stopPaymentCalls() {
+        paymentCalls.shutdownNow();
+    }
+
+    /**
+     * One charge call with the orchestrator's own time limit (payment.timeout), independent of whatever the gateway does.
+     * If it does not answer in time we cannot know whether the money was taken, so this throws the same
+     * {@link PaymentTimeoutException} a gateway timeout produces and the saga takes its existing timeout path (refund + compensate).
+     */
+    private PaymentResult chargeWithTimeout(UUID orderId, BigDecimal amount, String idempotencyKey) {
+        Future<PaymentResult> call = paymentCalls.submit(() -> paymentGateway.charge(orderId, amount, idempotencyKey));
+        try {
+            return call.get(paymentTimeout.toNanos(), TimeUnit.NANOSECONDS);
+        } catch (TimeoutException e) {
+            call.cancel(true);
+            throw new PaymentTimeoutException(idempotencyKey);
+        } catch (InterruptedException e) {
+            call.cancel(true);
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while waiting for the payment gateway", e);
+        } catch (ExecutionException e) {
+            if (e.getCause() instanceof RuntimeException runtime) {
+                throw runtime;                       // e.g. the gateway's own PaymentTimeoutException: same path
+            }
+            throw new IllegalStateException("Payment gateway call failed", e.getCause());
+        }
     }
 
     public Order checkout(UUID itemId, int quantity, String idempotencyKey) {
@@ -103,7 +145,7 @@ public class CheckoutOrchestrator {
         try {
             charge = observe(STEP_CHARGE, "order.id", orderId, () -> {
                 PaymentResult paid = observe(GATEWAY_CHARGE, "order.id", orderId,
-                        () -> paymentGateway.charge(orderId, amount, idempotencyKey));
+                        () -> chargeWithTimeout(orderId, amount, idempotencyKey));
                 return new Charge(paid, paid.isApproved() ? steps.recordPayment(orderId, paid.paymentId()) : null);
             });
         } catch (PaymentTimeoutException e) {
