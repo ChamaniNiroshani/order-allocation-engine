@@ -60,7 +60,9 @@ public final class FulfilmentDtos {
             @NotNull(message = "deliveryLon is required")
             @DecimalMin(value = "-180", message = "deliveryLon must be between -180 and 180")
             @DecimalMax(value = "180", message = "deliveryLon must be between -180 and 180") BigDecimal deliveryLon,
-            @NotNull(message = "customerTier is required") CustomerTier customerTier) {
+            @NotNull(message = "customerTier is required") CustomerTier customerTier,
+            /** Optional: NEAREST | FEFO | SPLIT (any case). Left out, the customer tier's default applies. */
+            String strategy) {
     }
 
     public record LineResponse(UUID batchId, UUID warehouseId, int quantity) {

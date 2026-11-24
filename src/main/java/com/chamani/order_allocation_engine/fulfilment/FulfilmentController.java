@@ -22,10 +22,12 @@ public class FulfilmentController {
 
     private final WarehouseCatalogService catalog;
     private final FulfilmentFacade facade;
+    private final StrategySelector selector;
 
-    public FulfilmentController(WarehouseCatalogService catalog, FulfilmentFacade facade) {
+    public FulfilmentController(WarehouseCatalogService catalog, FulfilmentFacade facade, StrategySelector selector) {
         this.catalog = catalog;
         this.facade = facade;
+        this.selector = selector;
     }
 
     @GetMapping("/{id}")
@@ -40,7 +42,7 @@ public class FulfilmentController {
             @Valid @RequestBody FulfilmentDtos.CreateFulfilmentRequest request) {
         FulfilmentDtos.FulfilmentResponse response = facade.fulfil(new FulfilmentService.Command(
                 request.sku().trim(), request.quantity(), request.deliveryLat(), request.deliveryLon(),
-                request.customerTier(), null, idempotencyKey));
+                request.customerTier(), selector.parse(request.strategy()), idempotencyKey));
         HttpStatus status = response.status() == FulfilmentStatus.ALLOCATED ? HttpStatus.CREATED : HttpStatus.CONFLICT;
         return ResponseEntity.status(status).body(response);
     }

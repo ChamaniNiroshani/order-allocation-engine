@@ -1,5 +1,6 @@
 package com.chamani.order_allocation_engine.exception;
 
+import com.chamani.order_allocation_engine.fulfilment.InvalidStrategyException;
 import org.hibernate.exception.JDBCConnectionException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.MessageSourceResolvable;
@@ -56,6 +57,11 @@ public class GlobalExceptionHandler {
                 .map(FieldError::getDefaultMessage)
                 .orElse("Validation failed");
         return buildResponse(HttpStatus.BAD_REQUEST, message);
+    }
+
+    @ExceptionHandler(InvalidStrategyException.class)
+    public ResponseEntity<Map<String, Object>> handleInvalidStrategy(InvalidStrategyException ex) {
+        return buildResponse(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
     @ExceptionHandler(IdempotencyKeyReusedException.class)

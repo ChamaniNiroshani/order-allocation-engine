@@ -1,6 +1,7 @@
 package com.chamani.order_allocation_engine.fulfilment;
 
 import com.chamani.order_allocation_engine.exception.IdempotencyKeyReusedException;
+import com.chamani.order_allocation_engine.metrics.AllocationMetrics;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
@@ -14,16 +15,26 @@ public class FulfilmentFacade {
     private final FulfilmentService service;
     private final FulfilmentOrderRepository orders;
     private final WarehouseCatalogService catalog;
+    private final StrategySelector selector;
+    private final AllocationMetrics metrics;
 
-    public FulfilmentFacade(FulfilmentService service, FulfilmentOrderRepository orders, WarehouseCatalogService catalog) {
+    public FulfilmentFacade(FulfilmentService service, FulfilmentOrderRepository orders, WarehouseCatalogService catalog,
+                            StrategySelector selector, AllocationMetrics metrics) {
         this.service = service;
         this.orders = orders;
         this.catalog = catalog;
+        this.selector = selector;
+        this.metrics = metrics;
     }
 
     public FulfilmentDtos.FulfilmentResponse fulfil(FulfilmentService.Command command) {
+        StrategyType strategy = selector.select(command.requestedStrategy(), command.customerTier());
+        return metrics.measureFulfilment(strategy, () -> doFulfil(command, strategy));
+    }
+
+    private FulfilmentDtos.FulfilmentResponse doFulfil(FulfilmentService.Command command, StrategyType strategy) {
         try {
-            return service.fulfil(command);
+            return service.fulfil(command, strategy);
         } catch (DataIntegrityViolationException e) {
             // Lost the race for this idempotency key: the winner's order is the answer. Anything else is a real error.
             FulfilmentOrder stored = orders.findByIdempotencyKey(command.idempotencyKey()).orElseThrow(() -> e);

@@ -3,6 +3,9 @@ package com.chamani.order_allocation_engine.metrics;
 import com.chamani.order_allocation_engine.concurrency.AllocationProperties;
 import com.chamani.order_allocation_engine.exception.IdempotencyKeyReusedException;
 import com.chamani.order_allocation_engine.exception.StockContentionException;
+import com.chamani.order_allocation_engine.fulfilment.FulfilmentDtos;
+import com.chamani.order_allocation_engine.fulfilment.FulfilmentStatus;
+import com.chamani.order_allocation_engine.fulfilment.StrategyType;
 import com.chamani.order_allocation_engine.model.Order;
 import com.chamani.order_allocation_engine.saga.CheckoutOutcomes;
 import io.micrometer.core.instrument.Counter;
@@ -29,6 +32,8 @@ import java.util.function.Supplier;
  *   <li>{@code saga.refunds}: refunds the saga asked the payment gateway for</li>
  *   <li>{@code reservations.active}: orders currently RESERVED (a cached value, see {@link ActiveReservationsRefresher})</li>
  * </ul>
+ * The multi-warehouse fulfilment flow reports on the same two meters with {@code flow=fulfilment} and
+ * {@code strategy=NEAREST|FEFO|SPLIT} (see {@link #measureFulfilment}).
  * ({@code allocation.lock.retries} stays where it is: OptimisticRetryExecutor counts it.)
  *
  * Tags are low-cardinality on purpose: a fixed handful of values each. Never an order id, item id or key.
@@ -58,11 +63,15 @@ public class AllocationMetrics {
 
     /** Checkout does not use allocation.locking-mode: it reserves with one atomic UPDATE under the order's row lock. */
     static final String SAGA_STRATEGY = "saga";
+    /** Value of the {@code flow} tag for POST /api/fulfilments. */
+    static final String FULFILMENT_FLOW = "fulfilment";
 
     private static final Duration SLO_THRESHOLD = Duration.ofMillis(200);
 
     private final Map<Flow, Map<Outcome, Counter>> requests = new EnumMap<>(Flow.class);
     private final Map<Flow, Timer> latency = new EnumMap<>(Flow.class);
+    private final Map<StrategyType, Map<Outcome, Counter>> fulfilmentRequests = new EnumMap<>(StrategyType.class);
+    private final Map<StrategyType, Timer> fulfilmentLatency = new EnumMap<>(StrategyType.class);
     private final Map<String, Counter> compensations;
     private final Counter refunds;
     private final AtomicLong activeReservations = new AtomicLong();
@@ -84,6 +93,24 @@ public class AllocationMetrics {
                     .tag("flow", tag(flow)).tag("strategy", strategy)
                     .publishPercentileHistogram(true)               // histogram_quantile() needs the buckets
                     .serviceLevelObjectives(SLO_THRESHOLD)          // an exact le="0.2" bucket for the 200 ms SLO
+                    .minimumExpectedValue(Duration.ofMillis(1))
+                    .maximumExpectedValue(Duration.ofSeconds(10))
+                    .register(registry));
+        }
+        for (StrategyType type : StrategyType.values()) {
+            Map<Outcome, Counter> byOutcome = new EnumMap<>(Outcome.class);
+            for (Outcome outcome : Outcome.values()) {
+                byOutcome.put(outcome, Counter.builder(REQUESTS)
+                        .description("Allocation requests by flow, outcome and locking strategy")
+                        .tag("flow", FULFILMENT_FLOW).tag("outcome", tag(outcome)).tag("strategy", type.name())
+                        .register(registry));
+            }
+            fulfilmentRequests.put(type, byOutcome);
+            fulfilmentLatency.put(type, Timer.builder(LATENCY)
+                    .description("Time to handle an allocation request, whatever its outcome")
+                    .tag("flow", FULFILMENT_FLOW).tag("strategy", type.name())
+                    .publishPercentileHistogram(true)
+                    .serviceLevelObjectives(SLO_THRESHOLD)
                     .minimumExpectedValue(Duration.ofMillis(1))
                     .maximumExpectedValue(Duration.ofSeconds(10))
                     .register(registry));
@@ -118,6 +145,24 @@ public class AllocationMetrics {
         } finally {
             requests.get(flow).get(outcome).increment();
             latency.get(flow).record(Duration.ofNanos(System.nanoTime() - start));
+        }
+    }
+
+    /** Runs one fulfilment request (multi-warehouse flow), counted and timed under its strategy. Exceptions are classified and rethrown. */
+    public FulfilmentDtos.FulfilmentResponse measureFulfilment(StrategyType strategy,
+                                                               Supplier<FulfilmentDtos.FulfilmentResponse> request) {
+        long start = System.nanoTime();
+        Outcome outcome = Outcome.ERROR;
+        try {
+            FulfilmentDtos.FulfilmentResponse response = request.get();
+            outcome = response.status() == FulfilmentStatus.ALLOCATED ? Outcome.ALLOCATED : Outcome.REJECTED;
+            return response;
+        } catch (IdempotencyKeyReusedException | IllegalArgumentException e) {
+            outcome = Outcome.REJECTED;                  // 422 / 400 / 404: the caller's mistake
+            throw e;
+        } finally {
+            fulfilmentRequests.get(strategy).get(outcome).increment();
+            fulfilmentLatency.get(strategy).record(Duration.ofNanos(System.nanoTime() - start));
         }
     }
 

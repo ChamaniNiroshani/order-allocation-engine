@@ -48,7 +48,7 @@ public class FulfilmentService {
         this.registry = registry;
     }
 
-    /** What the caller asked for. {@code requestedStrategy} may be null (then the customer tier decides). */
+    /** What the caller asked for. {@code requestedStrategy} may be null (then StrategySelector uses the customer tier default). */
     public record Command(String sku, int quantity, BigDecimal deliveryLat, BigDecimal deliveryLon,
                           CustomerTier customerTier, StrategyType requestedStrategy, String idempotencyKey) {
 
@@ -57,8 +57,9 @@ public class FulfilmentService {
         }
     }
 
+    /** @param strategyType the strategy already chosen for this request (explicit, or the customer tier default) */
     @Transactional
-    public FulfilmentDtos.FulfilmentResponse fulfil(Command command) {
+    public FulfilmentDtos.FulfilmentResponse fulfil(Command command, StrategyType strategyType) {
         String hash = command.requestHash();
 
         // Replay check BEFORE touching stock, so a retried key never decrements twice.
@@ -71,7 +72,6 @@ public class FulfilmentService {
             return FulfilmentDtos.FulfilmentResponse.from(stored, lines.findByFulfilmentOrderIdOrderById(stored.getId()));
         }
 
-        StrategyType strategyType = command.requestedStrategy() != null ? command.requestedStrategy() : StrategyType.NEAREST;
         FulfilmentOrder order = new FulfilmentOrder(command.sku(), command.quantity(), command.deliveryLat(), command.deliveryLon(),
                 command.customerTier(), strategyType, command.idempotencyKey(), hash);
 
