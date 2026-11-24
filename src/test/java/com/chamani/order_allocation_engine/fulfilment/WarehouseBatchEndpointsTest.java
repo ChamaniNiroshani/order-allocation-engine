@@ -144,9 +144,9 @@ class WarehouseBatchEndpointsTest {
                 .isInstanceOf(DataIntegrityViolationException.class);
 
         String key = "dup-" + UUID.randomUUID();
-        orders.save(new FulfilmentOrder("S", 1, BigDecimal.ONE, BigDecimal.ONE, CustomerTier.STANDARD, StrategyType.FEFO, key, null));
+        orders.save(new FulfilmentOrder("S", 1, BigDecimal.ONE, BigDecimal.ONE, CustomerTier.STANDARD, StrategyType.NEAREST, key, null));
         assertThatThrownBy(() -> orders.saveAndFlush(
-                new FulfilmentOrder("S", 1, BigDecimal.ONE, BigDecimal.ONE, CustomerTier.STANDARD, StrategyType.FEFO, key, null)))
+                new FulfilmentOrder("S", 1, BigDecimal.ONE, BigDecimal.ONE, CustomerTier.STANDARD, StrategyType.NEAREST, key, null)))
                 .isInstanceOf(DataIntegrityViolationException.class);
         assertThat(orders.findByIdempotencyKey(key)).isPresent();
     }

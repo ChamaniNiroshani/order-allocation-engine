@@ -40,6 +40,14 @@ public class InventoryBatch {
         this.expiryDate = expiryDate;
     }
 
+    /** Removes stock that a fulfilment line now holds. The caller holds the row lock and has checked the quantity. */
+    public void take(int quantity) {
+        if (quantity < 1 || quantity > qtyAvailable) {
+            throw new IllegalStateException("Cannot take " + quantity + " from batch " + id + " with " + qtyAvailable + " available");
+        }
+        this.qtyAvailable -= quantity;
+    }
+
     public UUID getId() { return id; }
     public String getSku() { return sku; }
     public UUID getWarehouseId() { return warehouseId; }

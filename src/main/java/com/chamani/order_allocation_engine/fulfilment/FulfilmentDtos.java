@@ -50,6 +50,19 @@ public final class FulfilmentDtos {
         }
     }
 
+    /** The body of POST /api/fulfilments. customerTier decides the default strategy; strategy is optional. */
+    public record CreateFulfilmentRequest(
+            @NotBlank(message = "sku is required") @Size(max = 64, message = "sku must be at most 64 characters") String sku,
+            @NotNull(message = "quantity is required") @Min(value = 1, message = "quantity must be at least 1") Integer quantity,
+            @NotNull(message = "deliveryLat is required")
+            @DecimalMin(value = "-90", message = "deliveryLat must be between -90 and 90")
+            @DecimalMax(value = "90", message = "deliveryLat must be between -90 and 90") BigDecimal deliveryLat,
+            @NotNull(message = "deliveryLon is required")
+            @DecimalMin(value = "-180", message = "deliveryLon must be between -180 and 180")
+            @DecimalMax(value = "180", message = "deliveryLon must be between -180 and 180") BigDecimal deliveryLon,
+            @NotNull(message = "customerTier is required") CustomerTier customerTier) {
+    }
+
     public record LineResponse(UUID batchId, UUID warehouseId, int quantity) {
         static LineResponse from(FulfilmentLine l) {
             return new LineResponse(l.getBatchId(), l.getWarehouseId(), l.getQuantity());
