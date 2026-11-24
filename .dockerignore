@@ -1,0 +1,18 @@
+# Keep the build context small and keep local files (and secrets) out of the image.
+target/
+.git/
+.github/
+.idea/
+.vscode/
+.junie/
+.mvn/wrapper/maven-wrapper.jar
+.env
+.env.*
+document/
+docs/
+load-tests/results/
+observability/
+*.md
+compose.yaml
+Dockerfile
+.dockerignore

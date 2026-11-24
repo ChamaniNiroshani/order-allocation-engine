@@ -27,6 +27,17 @@ transaction/audit trail.
    directly.
 3. The API is available at `http://localhost:8080`.
 
+## Run everything in Docker (app included)
+
+```bash
+docker compose --profile app up -d --build
+```
+
+Builds the image from `Dockerfile` (multi-stage, layered jar, non-root, JRE 21) and starts Postgres, the app, Prometheus,
+Grafana and Jaeger. The app is on **http://localhost:8081** (8080 stays free for runs from the IDE) and
+`/actuator/health/readiness` is its healthcheck. The `app` service is in a compose profile so that running the app from
+the IDE does not start a second copy. Point k6 at it with `-e BASE_URL=http://host.docker.internal:8081`.
+
 ## Logs
 
 Locally the logs are readable text; every line carries `req=<request id>` (the `X-Request-Id` header, or a generated

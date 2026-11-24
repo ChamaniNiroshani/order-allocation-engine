@@ -17,6 +17,47 @@ services:
       retries: 10
     restart: unless-stopped
 
+  # ---- The application itself (profile "app") ----------------------------------------------------------------
+  # Start the whole stack:  docker compose --profile app up -d --build
+  # It is in a PROFILE on purpose: Spring Boot's Docker Compose support starts every service that has no profile when
+  # you run the app from the IDE, and that would start a second app on port 8080 next to your IDE run.
+  # (Prometheus scrapes this service as app:8080, and the IDE run as host.docker.internal:8080; see prometheus.yml.)
+  app:
+    profiles: ["app"]
+    build: .
+    image: order-allocation-engine:local
+    container_name: oae-app
+    labels:
+      org.springframework.boot.readiness.disable: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${DB_NAME:-order_allocation_database}
+      SPRING_DATASOURCE_USERNAME: ${DB_USERNAME:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD:-postgres}
+      SPRING_DOCKER_COMPOSE_ENABLED: "false"        # we ARE the compose stack; do not look for one inside the container
+      MANAGEMENT_OTLP_TRACING_ENDPOINT: http://jaeger:4318/v1/traces
+      # Pass-through (no value): only set in the container when set in YOUR shell. Used by the chaos experiments in
+      # load-tests/ to override one setting for one run, without changing any default.
+      PAYMENT_FAKE_LATENCY_MS:
+      PAYMENT_FAKE_FAILURE_RATE:
+      PAYMENT_FAKE_TIMEOUT_RATE:
+      CHECKOUT_RESERVATION_TTL:
+      CHECKOUT_EXPIRY_INTERVAL:
+    ports:
+      # Host port 8081, NOT 8080: Prometheus scrapes host.docker.internal:8080 for the IDE run, and if this container
+      # were also published on 8080 that target would reach the same app and every metric would be counted twice.
+      - "${APP_PORT:-8081}:8080"
+    healthcheck:
+      # curl is part of the eclipse-temurin runtime image, so no extra package is needed
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health/readiness"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 40s
+    restart: unless-stopped
+
   # ---- Observability (see observability/ and docs/slo.md) ---------------------------------------------------
   # Spring Boot Docker Compose starts every service in this file when the app starts. These two are not
   # something the app connects to, so the readiness label stops it from waiting for their ports.
