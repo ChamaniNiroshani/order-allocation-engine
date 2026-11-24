@@ -11,20 +11,22 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class StrategyRegistryTest {
 
+    private final NearestWarehouseStrategy nearest = new NearestWarehouseStrategy(filter(2));
+    private final FefoStrategy fefo = new FefoStrategy(filter(2));
+    private final SplitShipmentStrategy split = new SplitShipmentStrategy(filter(2));
+
     @Test
     void indexesEveryStrategyByItsType() {
-        NearestWarehouseStrategy nearest = new NearestWarehouseStrategy(filter(2));
-        FefoStrategy fefo = new FefoStrategy(filter(2));
-
-        StrategyRegistry registry = new StrategyRegistry(List.of(nearest, fefo));
+        StrategyRegistry registry = new StrategyRegistry(List.of(nearest, fefo, split));
 
         assertThat(registry.get(StrategyType.NEAREST)).isSameAs(nearest);
         assertThat(registry.get(StrategyType.FEFO)).isSameAs(fefo);
+        assertThat(registry.get(StrategyType.SPLIT)).isSameAs(split);
     }
 
     @Test
     void duplicateType_failsAtStartup() {
-        assertThatThrownBy(() -> new StrategyRegistry(List.of(new NearestWarehouseStrategy(filter(2)), new FefoStrategy(filter(2)), new NearestWarehouseStrategy(filter(2)))))
+        assertThatThrownBy(() -> new StrategyRegistry(List.of(nearest, fefo, split, new NearestWarehouseStrategy(filter(2)))))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Duplicate")
                 .hasMessageContaining("NEAREST");
@@ -32,15 +34,11 @@ class StrategyRegistryTest {
 
     @Test
     void missingType_failsAtStartup() {
-        assertThatThrownBy(() -> new StrategyRegistry(List.of()))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("No AllocationStrategy implementation for NEAREST");
-    }
-
-    @Test
-    void onlyOneOfTwoTypes_failsAtStartup() {
-        assertThatThrownBy(() -> new StrategyRegistry(List.of(new NearestWarehouseStrategy(filter(2)))))
+        assertThatThrownBy(() -> new StrategyRegistry(List.of(nearest, split)))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("No AllocationStrategy implementation for FEFO");
+        assertThatThrownBy(() -> new StrategyRegistry(List.of()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("No AllocationStrategy implementation for");
     }
 }
