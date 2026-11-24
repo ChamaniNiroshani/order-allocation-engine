@@ -89,7 +89,7 @@ What a client got, measured:
 | Question | Observed |
 |---|---|
 | Status codes during the outage | **9 x 500**, all finishing at t=31.4 s, the moment the connections were cut. After that **no response at all** between t=35 s and about t=55 s: nothing failed, nothing succeeded. |
-| How long did requests hang? | 3 order probes started at t=37.7 s each took **20.1 to 20.3 s** and then returned **201**. k6: **184 requests finished in the last bucket with p95 25.9 s, slowest 26.05 s**, and all of them were 201. |
+| How long did requests hang? | 3 order probes started at t=37.7 s each took **20.1 to 20.3 s** and then returned **201**. k6: **20 requests took 1 s or more, i.e. one per VU, all of them hung for about 20 to 26 s (slowest 26.05 s) and all returned 201**; they finished in the 55-60 s bucket, which is why that bucket's p95 is 25.9 s (the other requests in that bucket are normal ones after recovery). |
 | Response body of the 500s | Not captured by a client in this run (the 9 failures were k6 requests and the probes happened not to be among them). The server's catch-all handler returns `{"status":500,"error":"Internal Server Error","message":"Unexpected error occurred"}` (`GlobalExceptionHandler#handleUnexpected`), and the log has a matching `Unhandled exception` ERROR for each of the 9. No `Retry-After`. |
 | Hikari timeouts in the log | **0** "Connection is not available" messages. The longest wait (26.05 s) was shorter than the 30 s `connection-timeout`, so requests waited and then succeeded. **With an outage longer than about 30 s these requests would have failed with a 500 after 30 s each.** |
 | Log volume | 6947 log lines in the window: **50 ERROR lines and 2847 stack-trace lines**. The 9 failures each logged `Unhandled exception` plus the JDBC errors (`FATAL: terminating connection due to administrator command`, `An I/O error occurred while sending to the backend`), 5 also `Application exception overridden by rollback exception`. |
@@ -125,6 +125,84 @@ Hypothesis 4 (data stays correct) **held**; hypotheses 1 and 2 **did not**; hypo
 
 Fixes this points to (OAE-34): lower the Hikari connection timeout so requests fail in seconds; map "database
 unavailable" to 503 + `Retry-After`, logged once at WARN; make readiness fail fast and report DOWN.
+
+### Run: AFTER fixes
+
+What changed (commit `fix(resilience): fail fast and answer 503 when the database is down`): Hikari
+`connection-timeout` 30 s to 3 s (`validation-timeout` 2 s); "database unavailable" errors (no connection from the pool,
+connection lost mid-request, including the wrappers seen on in-flight requests) answered with **503 + `Retry-After: 5`**
+and one rate-limited WARN line instead of a 500 with a stack trace; Hibernate's per-failure `SqlExceptionHelper` logging
+switched off so each failure is logged once, by the handler. Everything else is as in the BEFORE run: same script, same
+load, same 20 s outage, same machine.
+
+Timeline (t = seconds after the first order request, local time 12:29:27): `stop postgres` issued 30.0 s, returned
+33.5 s; `start postgres` issued 53.5 s; container healthy 60.0 s.
+
+20 VUs, 4810 requests: **4640 x 201, 170 x 503, 0 x 500**, no 409, no timeouts.
+
+| Bucket | Requests | 201 | 409 | 5xx | timeout / conn. error | p95 ms | max ms |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 0-5 s | 466 | 466 | 0 | 0 | 0 | 386 | 550 |
+| 5-10 s | 692 | 692 | 0 | 0 | 0 | 252 | 425 |
+| 10-15 s | 640 | 640 | 0 | 0 | 0 | 311 | 761 |
+| 15-20 s | 913 | 913 | 0 | 0 | 0 | 206 | 381 |
+| 20-25 s | 862 | 862 | 0 | 0 | 0 | 212 | 394 |
+| 25-30 s | 669 | 669 | 0 | 0 | 0 | 273 | 471 |
+| **30-35 s** | 186 | 156 | 0 | **30** | 0 | 3,093 | 3,135 |
+| **35-40 s** | 20 | 0 | 0 | **20** | 0 | 3,104 | 3,106 |
+| **40-45 s** | 40 | 0 | 0 | **40** | 0 | 3,039 | 3,050 |
+| **45-50 s** | 40 | 0 | 0 | **40** | 0 | 3,068 | 3,083 |
+| **50-55 s** | 20 | 0 | 0 | **20** | 0 | 3,049 | 3,052 |
+| **55-60 s** | 137 | 117 | 0 | **20** | 0 | 3,055 | 3,131 |
+
+![Grafana during the AFTER run](img/chaos-db-after.png)
+
+*Grafana, whole run (12:28:57 to 12:30:58), same panels as the BEFORE screenshot. The 5xx ratio now rises during the
+outage (a 1-minute window, so it keeps climbing until the window is full of outage), latency tops out at about 3 s (the
+connection timeout) instead of 10 s+, and Hikari pending reaches 26 (28 before): with 20 VUs and probes all asking for a
+connection, the queue is still as deep as the clients are many, but each waiter now leaves after 3 s.*
+
+What a client got:
+
+| Question | Observed |
+|---|---|
+| Status codes | **503 with `Retry-After: 5`** and the body `{"error":"Service Unavailable","message":"The service is temporarily unavailable. Please retry shortly.","status":503,...}`. No 500 at all. |
+| How long did a request wait? | Every failed request was answered in **3.0 to 3.2 s** (the connection timeout). Slowest request of the whole run **3,135 ms** (was 26,052 ms). 15 of 33 order probes got 503, none took longer than 3,146 ms. |
+| Readiness during the outage | **503 `{"status":"DOWN"}`**, answered in 3.0 to 3.4 s, for every probe that started between t=34.9 s and t=51.5 s (5 probes). First `UP` again at t=55.5 s. Before the fix it never said DOWN. |
+| Log | 10 ERROR lines (was 50), 24 WARN. The handler wrote **3 WARN lines for 213 failures** ("Database unavailable, answering 503: ... (72 similar failures were not logged in the last 10 s)"), no stack trace. 0 `Unhandled exception`. |
+| Time to recover | First 201 after `start postgres` was issued: **3.8 s after the command** (t=57.3 s); BEFORE it was 4.0 s. The last 503 finished at t=56.3 s. |
+| Invariants | **Held.** 51 items, 0 negative stock, 0 mismatched items; 46,342 available + 0 reserved + 4,658 allocated = 51,000 = initial. |
+| Orphan orders | **None.** ALLOCATED = 4658. |
+
+Residual noise, not fixed: the log still contains stack traces written by Spring's transaction interceptor
+("Application exception overridden by rollback exception", 9, for the requests caught in flight at the instant of the
+stop) and by Boot's health indicator ("DataSource health check failed", 8, one per failed readiness probe). They come from
+framework loggers, not from the handler. The "stack-trace lines" count in the run output (3,932) is dominated by those
+few deep traces, so it is a poor measure; the number of ERROR lines (10) is the better one.
+
+How I got here (kept honest): this is the **third** AFTER run. The first (after the first version of the fix) still had
+10 x 500 and 593 ERROR lines: requests caught in flight failed inside a `JpaSystemException` wrapper that was not mapped,
+and Hibernate logged every failed connection attempt twice. The second had 6 x 500, all "Unable to rollback" caused by the
+pool's `Connection is closed` (no SQLSTATE). Each gap was closed and tested, the fix commit was amended (nothing was
+pushed), and only this final run is the record.
+
+### Before and after, DB outage (20 VUs, 60 s, Postgres stopped about 20 s)
+
+| | BEFORE | AFTER |
+|---|---|---|
+| Requests that hung (no answer for 20 s or more) | **20** (every VU's request, plus the 3 order probes), answered 201 only after Postgres was back, **up to 26 s** | **0**; every failed request was answered in about 3 s |
+| Max latency | **26,052 ms** | **3,135 ms** |
+| 5xx type | **500** (9), unhandled, with a stack trace each, no `Retry-After` | **503** (170) with `Retry-After: 5` and a generic body; **0 x 500** |
+| Readiness during the outage | never DOWN: hung (10 s client timeout, or 8.7 s then UP) | **503 DOWN in about 3 s** |
+| Time to recover (first 201 after `start postgres`) | 4.0 s | 3.8 s |
+| Stock invariant | held (51,000 = 51,000) | held (51,000 = 51,000) |
+| Orphan orders | none | none |
+| ERROR log lines | 50 (9 with a full stack trace) | 10 (framework loggers); 3 handler WARN lines for 213 failures |
+
+A trade-off to know: during the outage the system now *rejects* requests (170 x 503) that used to *wait* (and eventually
+succeed, because this outage was shorter than 30 s). That is the intended behaviour (a client can retry or back off
+immediately instead of holding a connection for 25 s), but a client that does not retry sees more failures for a short
+outage. With an outage longer than 30 s the old behaviour would also have failed, only after 30 s per request.
 
 ---
 
@@ -201,3 +279,55 @@ Findings for OAE-34 from this experiment: none that call for a code change by th
 timeout of the orchestrator's own (a slow payment holds the request, and its reservation, for as long as the gateway
 takes), which is a design gap visible in the code and consistent with the 5 s waits here, but this run did not measure a
 stuck gateway.
+
+### Run: AFTER fixes
+
+The code that matters for a crash mid-checkout (reserve, charge, confirm, expiry) was **not changed** by the fixes: the
+BEFORE run showed correct recovery, so there was nothing for this data to fix. The run was repeated on the fixed build to
+check that nothing regressed. The only change on this path is the new `payment.timeout` (default 10 s) around the charge
+call; with the 5 s payment used here it is never reached, so the experiment is the same. Same overrides, same load, same kill.
+
+| Question | BEFORE | AFTER |
+|---|---|---|
+| At the kill | RESERVED = 10, PAID = 0, reserved stock 10 units | RESERVED = **7**, PAID = **1**, reserved stock 8 units |
+| App healthy again | 18.9 s after the kill | **64.0 s** after the kill (the laptop was busier; not caused by the fixes) |
+| **Time until RESERVED = 0** | 31.7 s after the kill (12.8 s after healthy) | **65.3 s** after the kill (**1.3 s** after healthy) |
+| Fate of the stuck orders | EXPIRED = 10 | **EXPIRED = 7, CONFIRMED = 1** |
+| Stock | exact: 19,960 available + 40 confirmed = 20,000; 0 reserved | exact: 19,966 available + 34 confirmed = 20,000; 0 reserved |
+| Negative stock / mismatched items | 0 / 0 | 0 / 0 |
+| k6 | 40 x 201, 75 connection errors | 33 x 201, 72 connection errors |
+
+![Grafana during the AFTER app-kill run](img/chaos-app-after.png)
+
+*Grafana, whole run (12:52:42 to 12:55:04). "Active reservations" rises, has a gap while the app is dead, then drops to 0;
+"Saga compensations by reason" shows `expired`.*
+
+How to read the times: the time to reach 0 is set by `max(restart time, TTL since the order was reserved) + up to one
+expiry interval`. BEFORE, the app was back after 18.9 s, but the orders were only 30 s old at about 30 s, so RESERVED
+reached 0 at 31.7 s. AFTER, the app took 64 s to start (a slower, loaded start), so the orders were already stale when the
+expiry job first ran and RESERVED reached 0 only 1.3 s after the app was healthy. The two runs are therefore **not
+comparable on this number**: it measures how long the laptop took to start the JVM, not a property of the fix.
+
+**New in this run:** one order was **PAID** at the kill (the payment had been recorded, the confirm had not run yet). After
+the restart the recovery path confirmed it: **PAID = 1 became CONFIRMED = 1** and its stock left the warehouse (`reserved`
+went to 0, `available` did not come back). This is the case the BEFORE run did not exercise; it landed here by chance, so
+it is one observation, not a measured rate. The 7 orders that were only RESERVED expired and their stock returned.
+
+The open item from the BEFORE analysis is unchanged: the expiry path releases stock but never calls the gateway's refund,
+and the fake gateway cannot show whether a charge was taken. `payment.timeout` handles a gateway that is too slow while
+the app is running (refund by key, cancel, release); it does not cover a crash.
+
+---
+
+## What changed, and what the data said
+
+| Change (commit `fix(resilience)`) | Evidence it was needed | Evidence it works |
+|---|---|---|
+| Hikari `connection-timeout` 30 s to 3 s | requests hung 25 to 26 s during a 20 s outage; readiness hung too | slowest request 3.1 s; readiness DOWN in 3 s |
+| "Database unavailable" to 503 + `Retry-After` + one rate-limited WARN | 9 x 500 with a stack trace each | 170 x 503 with `Retry-After: 5`, 0 x 500, 3 WARN lines for 213 failures; unit tests for every exception shape seen, and a test that an unrelated SQL error is still a 500 |
+| Cause-chain check for in-flight failures (`JpaSystemException`, `Connection is closed`) | found by the first and second AFTER runs (10, then 6 x 500) | 0 x 500 in the final run |
+| `SqlExceptionHelper` logging off | first AFTER run: 593 ERROR lines | 10 ERROR lines |
+| `payment.timeout` (default 10 s) in the orchestrator, same path as a gateway timeout | **design gap, not measured by the chaos runs**: the orchestrator had no limit of its own, so a slow gateway held the request and its reservation as long as the gateway took | integration test `SagaPaymentTimeoutScenarioTest`: a 3 s gateway with `payment.timeout=300ms` gives a 502, refund by key, CANCELLED, stock restored, in well under 2.5 s |
+
+Not changed, on purpose: the crash-recovery path (the data showed it correct), and the refund-on-expiry gap (it needs a
+real gateway to measure).
