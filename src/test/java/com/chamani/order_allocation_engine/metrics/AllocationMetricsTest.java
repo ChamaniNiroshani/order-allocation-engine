@@ -4,6 +4,7 @@ import com.chamani.order_allocation_engine.concurrency.AllocationProperties;
 import com.chamani.order_allocation_engine.concurrency.LockingMode;
 import com.chamani.order_allocation_engine.exception.IdempotencyKeyReusedException;
 import com.chamani.order_allocation_engine.exception.StockContentionException;
+import com.chamani.order_allocation_engine.fulfilment.StrategyType;
 import com.chamani.order_allocation_engine.metrics.AllocationMetrics.Flow;
 import com.chamani.order_allocation_engine.metrics.AllocationMetrics.Outcome;
 import com.chamani.order_allocation_engine.model.Order;
@@ -130,7 +131,9 @@ class AllocationMetricsTest {
 
     @Test
     void everySeriesExistsFromTheStart_soRateWorksBeforeTheFirstEvent() {
-        assertEquals(Flow.values().length * Outcome.values().length, registry.find(AllocationMetrics.REQUESTS).counters().size());
+        // the direct and checkout flows, plus the fulfilment flow once per strategy
+        int series = Flow.values().length + StrategyType.values().length;
+        assertEquals(series * Outcome.values().length, registry.find(AllocationMetrics.REQUESTS).counters().size());
         assertEquals(3, registry.find(AllocationMetrics.COMPENSATIONS).counters().size());
         assertEquals(0, registry.get(AllocationMetrics.REFUNDS).counter().count());
         assertEquals(0, registry.get(AllocationMetrics.ACTIVE_RESERVATIONS).gauge().value());
@@ -152,8 +155,9 @@ class AllocationMetricsTest {
                         "tag value looks like an identifier: " + tag);
             }
         }
-        // the whole business surface is a fixed, small number of series: 10 counters, 2 timers, 3 compensations, refunds, gauge
-        assertEquals(10 + 2 + 3 + 1 + 1, businessMeters);
+        // the whole business surface is a fixed, small number of series: 25 counters (2 flows + 3 fulfilment strategies, 5 outcomes
+        // each), 5 timers, 3 compensations, refunds, gauge
+        assertEquals(25 + 5 + 3 + 1 + 1, businessMeters);
     }
 
     // ---- saga counters ------------------------------------------------------------------------------------
