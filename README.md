@@ -1,5 +1,7 @@
 # Order Allocation & Transaction Engine
 
+[![CI](https://github.com/ChamaniNiroshani/order-allocation-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/ChamaniNiroshani/order-allocation-engine/actions/workflows/ci.yml)
+
 Spring Boot backend that allocates orders against limited inventory under
 concurrency-safe rules, with idempotent retries and an append-only
 transaction/audit trail.
