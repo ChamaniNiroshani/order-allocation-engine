@@ -63,3 +63,51 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # Publishes the image to GitHub Container Registry. Only on a push to main (i.e. after a PR is merged),
+  # and only when both the tests and the Docker build passed. Needs no secret beyond the built-in GITHUB_TOKEN.
+  publish:
+    name: Publish image
+    needs: [build, docker-build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Only this job may write packages; the workflow default stays read-only.
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # metadata-action lower-cases the image name (GHCR requires it), so ghcr.io/ChamaniNiroshani/... is fine as input.
+      # It also adds the OCI labels, among them org.opencontainers.image.source (repo URL) and .revision (commit SHA).
+      - name: Image name, tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/order-allocation-engine
+          tags: |
+            type=sha,format=long,prefix=
+            type=raw,value=latest
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
