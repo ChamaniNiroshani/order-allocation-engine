@@ -136,6 +136,7 @@ class AllocationMetricsTest {
         assertEquals(series * Outcome.values().length, registry.find(AllocationMetrics.REQUESTS).counters().size());
         assertEquals(3, registry.find(AllocationMetrics.COMPENSATIONS).counters().size());
         assertEquals(0, registry.get(AllocationMetrics.REFUNDS).counter().count());
+        assertEquals(0, registry.get(AllocationMetrics.REFUND_FAILURES).counter().count());
         assertEquals(0, registry.get(AllocationMetrics.ACTIVE_RESERVATIONS).gauge().value());
     }
 
@@ -156,8 +157,8 @@ class AllocationMetricsTest {
             }
         }
         // the whole business surface is a fixed, small number of series: 25 counters (2 flows + 3 fulfilment strategies, 5 outcomes
-        // each), 5 timers, 3 compensations, refunds, gauge
-        assertEquals(25 + 5 + 3 + 1 + 1, businessMeters);
+        // each), 5 timers, 3 compensations, refunds, refund failures, gauge
+        assertEquals(25 + 5 + 3 + 1 + 1 + 1, businessMeters);
     }
 
     // ---- saga counters ------------------------------------------------------------------------------------

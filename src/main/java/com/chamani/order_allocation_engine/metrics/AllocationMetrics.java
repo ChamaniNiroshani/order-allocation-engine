@@ -30,6 +30,7 @@ import java.util.function.Supplier;
  *   <li>{@code allocation.latency} {flow, strategy}: request time, with a percentile histogram for p99 in Prometheus</li>
  *   <li>{@code saga.compensations} {reason}: orders given back (declined | timeout | expired)</li>
  *   <li>{@code saga.refunds}: refunds the saga asked the payment gateway for</li>
+ *   <li>{@code saga.refund.failures}: refunds of expired orders that failed (not retried)</li>
  *   <li>{@code reservations.active}: orders currently RESERVED (a cached value, see {@link ActiveReservationsRefresher})</li>
  * </ul>
  * The multi-warehouse fulfilment flow reports on the same two meters with {@code flow=fulfilment} and
@@ -45,6 +46,7 @@ public class AllocationMetrics {
     public static final String LATENCY = "allocation.latency";
     public static final String COMPENSATIONS = "saga.compensations";
     public static final String REFUNDS = "saga.refunds";
+    public static final String REFUND_FAILURES = "saga.refund.failures";
     public static final String ACTIVE_RESERVATIONS = "reservations.active";
 
     /** Which of the two entry points handled the request. */
@@ -74,6 +76,7 @@ public class AllocationMetrics {
     private final Map<StrategyType, Timer> fulfilmentLatency = new EnumMap<>(StrategyType.class);
     private final Map<String, Counter> compensations;
     private final Counter refunds;
+    private final Counter refundFailures;
     private final AtomicLong activeReservations = new AtomicLong();
 
     public AllocationMetrics(MeterRegistry registry, AllocationProperties properties) {
@@ -120,7 +123,11 @@ public class AllocationMetrics {
                 REASON_TIMEOUT, compensationCounter(registry, REASON_TIMEOUT),
                 REASON_EXPIRED, compensationCounter(registry, REASON_EXPIRED));
         refunds = Counter.builder(REFUNDS)
-                .description("Refunds the checkout saga asked the payment gateway for (timeouts and payments that arrived too late)")
+                .description("Refunds the checkout saga asked the payment gateway for (timeouts, payments that arrived too late, "
+                        + "and every expired reservation, charged or not)")
+                .register(registry);
+        refundFailures = Counter.builder(REFUND_FAILURES)
+                .description("Refunds of expired reservations that failed and are not retried")
                 .register(registry);
         Gauge.builder(ACTIVE_RESERVATIONS, activeReservations, AtomicLong::get)
                 .description("Orders currently RESERVED (stock held, payment not finished); refreshed periodically, not per scrape")
@@ -194,6 +201,10 @@ public class AllocationMetrics {
 
     public void refund() {
         refunds.increment();
+    }
+
+    public void refundFailure() {
+        refundFailures.increment();
     }
 
     public void setActiveReservations(long count) {

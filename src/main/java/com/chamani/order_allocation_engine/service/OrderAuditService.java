@@ -25,6 +25,7 @@ public class OrderAuditService {
 
     public static final String ENTITY_TYPE = "ORDER";
     public static final String ACTION_PAYMENT_REFUNDED = "PAYMENT_REFUNDED";
+    public static final String ACTION_REFUND_REQUESTED = "REFUND_REQUESTED";
 
     /** The order's state before a change: its status (for the action name) and a small JSON document. */
     public record Snapshot(OrderStatus status, String json) {}

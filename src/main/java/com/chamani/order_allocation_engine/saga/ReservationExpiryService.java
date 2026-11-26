@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * One batch of expiry work per call, each call ONE transaction: lock the batch (SKIP LOCKED), change the
@@ -35,10 +36,12 @@ public class ReservationExpiryService {
      * RESERVED orders reserved before the cutoff -> EXPIRED, and their stock goes back. Orders a saga step
      * currently holds are skipped (that step is about to decide the order's fate itself).
      *
-     * @return how many orders were expired (a full batch means there may be more)
+     * No gateway call happens here: the caller refunds the returned orders once this transaction has committed.
+     *
+     * @return the orders that were expired (a full batch means there may be more)
      */
     @Transactional
-    public int expireBatch(Instant cutoff, int batchSize) {
+    public List<Order> expireBatch(Instant cutoff, int batchSize) {
         List<Order> stale = orderRepository.lockOlderThan(OrderStatus.RESERVED.name(), cutoff, batchSize);
         for (Order order : stale) {
             OrderAuditService.Snapshot before = orderAudit.snapshot(order);
@@ -46,7 +49,17 @@ public class ReservationExpiryService {
             order.expire();
             orderAudit.record(order, before);
         }
-        return stale.size();
+        return stale;
+    }
+
+    /**
+     * Audits that the gateway accepted the refund call for an expired order. The order itself is not changed:
+     * the gateway does not say whether anything had been charged, so this must not claim money went back.
+     */
+    @Transactional
+    public void recordRefundRequest(UUID orderId) {
+        Order order = orderRepository.findById(orderId).orElseThrow();
+        orderAudit.record(order, orderAudit.snapshot(order), OrderAuditService.ACTION_REFUND_REQUESTED);
     }
 
     /**
