@@ -118,7 +118,7 @@ class SagaConcurrencyScenarioTest extends AbstractSagaScenarioTest {
         assertEquals(expired + 1, counter("saga.compensations", "reason", "expired"), "the job counts what it expired");
         assertEquals(OrderStatus.EXPIRED, order(key).getStatus());
         assertStock(itemId, 10, 0);
-        assertEquals(List.of("PENDING->RESERVED", "RESERVED->EXPIRED"), actions(orderId));
+        assertEquals(List.of("PENDING->RESERVED", "RESERVED->EXPIRED", "REFUND_REQUESTED"), actions(orderId));
         assertEquals(0, gateway.chargeCount(key), "nothing was ever charged");
     }
 
@@ -148,7 +148,7 @@ class SagaConcurrencyScenarioTest extends AbstractSagaScenarioTest {
         }
 
         assertEquals(expired + 1, counter("saga.compensations", "reason", "expired"), "counted once, by the job");
-        assertEquals(refunds + 1, counter("saga.refunds"), "the late payment was refunded");
+        assertEquals(refunds + 2, counter("saga.refunds"), "the job's refund (nothing charged yet), then the saga's for the late payment");
         assertEquals(cancelledCompensations, counter("saga.compensations", "reason", "declined") + counter("saga.compensations", "reason", "timeout"),
                 "the saga must not count a compensation the job already made");
 
@@ -158,7 +158,7 @@ class SagaConcurrencyScenarioTest extends AbstractSagaScenarioTest {
         assertEquals(1, spiedGateway.chargeCount(key), "the money was taken");
         assertEquals(1, spiedGateway.refundCount(key), "and given back");
         assertStock(itemId, 10, 0);                                    // released once, never confirmed
-        assertEquals(List.of("PENDING->RESERVED", "RESERVED->EXPIRED", "PAYMENT_REFUNDED"), actions(order.getOrderId()));
+        assertEquals(List.of("PENDING->RESERVED", "RESERVED->EXPIRED", "REFUND_REQUESTED", "PAYMENT_REFUNDED"), actions(order.getOrderId()));
     }
 
     @Test

@@ -122,7 +122,7 @@ class ReservationExpiryTest {
         assertEquals(OrderStatus.EXPIRED, order(orderId).getStatus());
         assertEquals("Reservation expired", order(orderId).getFailureReason());
         assertStock(itemId, 10, 0);
-        assertEquals(List.of("PENDING->RESERVED", "RESERVED->EXPIRED"), actions(orderId));
+        assertEquals(List.of("PENDING->RESERVED", "RESERVED->EXPIRED", "REFUND_REQUESTED"), actions(orderId));
     }
 
     @Test
@@ -164,7 +164,7 @@ class ReservationExpiryTest {
         assertEquals(0, job.expireStale());
 
         assertStock(itemId, 10, 0);
-        assertEquals(2, actions(orderId).size());
+        assertEquals(3, actions(orderId).size());              // reserved, expired, refund requested
     }
 
     @Test
@@ -178,12 +178,12 @@ class ReservationExpiryTest {
         backdate(newest, 10);
         Instant cutoff = Instant.now().minus(Duration.ofMinutes(5));
 
-        assertEquals(2, expiryService.expireBatch(cutoff, 2), "a batch of 2");
+        assertEquals(2, expiryService.expireBatch(cutoff, 2).size(), "a batch of 2");
         assertEquals(OrderStatus.EXPIRED, order(oldest).getStatus());
         assertEquals(OrderStatus.EXPIRED, order(middle).getStatus());
         assertEquals(OrderStatus.RESERVED, order(newest).getStatus(), "the newest waits for the next batch");
 
-        assertEquals(1, expiryService.expireBatch(cutoff, 2));
+        assertEquals(1, expiryService.expireBatch(cutoff, 2).size());
         assertEquals(OrderStatus.EXPIRED, order(newest).getStatus());
         assertStock(itemId, 10, 0);
     }
@@ -275,7 +275,7 @@ class ReservationExpiryTest {
         assertEquals(40, total, "every order expired by exactly one of the two jobs");
         assertStock(itemId, 40, 0);
         for (UUID id : ids) {
-            assertEquals(2, actions(id).size(), "reserved + expired, never expired twice");
+            assertEquals(3, actions(id).size(), "reserved + expired + refund requested, never expired twice");
         }
     }
 
