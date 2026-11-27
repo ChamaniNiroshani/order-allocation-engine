@@ -1,4 +1,9 @@
-# Deploying the public demo: Render (app) and Neon (database)
+# Deploying: Render (app) and Neon (database)
+
+> **Status: tested locally at 512 MB / 0.1 CPU, not hosted.** The production image and
+> [`smoke-live.ps1`](smoke-live.ps1) were run in a local simulation ([below](#startup-time-on-a-fraction-of-a-cpu)).
+> The Render and Neon steps themselves have **never been carried out**: they come from the providers' documentation.
+> Why there is no hosted demo: [ADR-0010](adr/0010-no-free-tier-hosting.md).
 
 Both in Singapore, both on free plans. The app is built from the [`Dockerfile`](../Dockerfile) as described by
 [`render.yaml`](../render.yaml), and runs with the `prod` profile.
@@ -92,11 +97,11 @@ has had no traffic for more than 15 minutes.
 | Actuator exposes `health` only | no public metrics; readiness is `/actuator/health/readiness` |
 | `reservations.active` refresh off | nothing reads it here, and it queried the database every 5 seconds |
 | JSON logs, trace export off | no tracing backend is set up |
-| Swagger UI on | this is a public demo |
+| Swagger UI on | meant for a demo, so the API can be explored |
 
-## Limits of this demo
+## Limits of such a demo
 
-- **No authentication.** Anyone with the URL can create data, which can use up the database's storage or compute
+- **No authentication.** If you deploy it, anyone with the URL can create data, which can use up the database's storage or compute
   hours. A real service would put the API and its documentation behind authentication.
 - The payment gateway is a fake that keeps its state in memory: it forgets every charge when the instance restarts.
 - No demo data is loaded. Create warehouses and batches through the API first.

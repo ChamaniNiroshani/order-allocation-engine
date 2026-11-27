@@ -13,3 +13,4 @@ New records start from [the template](0000-template.md).
 | [0007](0007-flyway-owns-the-schema.md) | Flyway owns the schema | Versioned SQL migrations change the schema; Hibernate only validates it. |
 | [0008](0008-observability-stack.md) | Observability stack | Micrometer and OpenTelemetry feed Prometheus, Grafana and Jaeger. |
 | [0009](0009-allocation-strategy-pattern.md) | Allocation strategy pattern | `NEAREST`, `FEFO` and `SPLIT` are pure functions behind one interface. |
+| [0010](0010-no-free-tier-hosting.md) | No free-tier hosting | The demo is a recorded video; the project stays deployment-ready but is not hosted. |
