@@ -208,6 +208,11 @@ outage. With an outage longer than 30 s the old behaviour would also have failed
 
 ## 2. Kill the app in the middle of checkouts
 
+> **Update (2026-11-27):** the expiry job now requests a refund for every expired order (fixed in
+> [#27](https://github.com/ChamaniNiroshani/order-allocation-engine/pull/27)). It is not retried yet: see
+> [#28](https://github.com/ChamaniNiroshani/order-allocation-engine/issues/28). The BEFORE and AFTER results below are
+> unchanged, as the record of those runs; where they say the expiry path never refunds, that was true at the time.
+
 ### Run: BEFORE fixes (no resilience changes yet)
 
 #### Hypothesis
