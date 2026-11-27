@@ -4,6 +4,8 @@ import com.chamani.order_allocation_engine.concurrency.AllocationProperties;
 import com.chamani.order_allocation_engine.concurrency.DecrementResult;
 import com.chamani.order_allocation_engine.concurrency.StockDecrementer;
 import com.chamani.order_allocation_engine.exception.IdempotencyKeyReusedException;
+import com.chamani.order_allocation_engine.idempotency.IdempotencyKeys;
+import com.chamani.order_allocation_engine.idempotency.IdempotentFlow;
 import com.chamani.order_allocation_engine.logging.OrderEvents;
 import com.chamani.order_allocation_engine.model.Allocation;
 import com.chamani.order_allocation_engine.model.Order;
@@ -25,12 +27,15 @@ public class AllocationService {
     private final AllocationRepository allocationRepository;
     private final StockDecrementer stockDecrementer;
     private final OrderAuditService orderAudit;
+    private final IdempotencyKeys idempotencyKeys;
 
     public AllocationService(OrderRepository orderRepository,
                               AllocationRepository allocationRepository,
                               List<StockDecrementer> decrementers,
                               AllocationProperties properties,
-                              OrderAuditService orderAudit) {
+                              OrderAuditService orderAudit,
+                              IdempotencyKeys idempotencyKeys) {
+        this.idempotencyKeys = idempotencyKeys;
         this.orderRepository = orderRepository;
         this.allocationRepository = allocationRepository;
         this.orderAudit = orderAudit;
@@ -54,15 +59,17 @@ public class AllocationService {
 
         // Replay check BEFORE touching stock, so a retried key never decrements twice. Two
         // concurrent first-time requests with the same key can both miss here; the unique
-        // constraint on idempotency_key settles that (see OrderAllocationFacade).
-        var existing = orderRepository.findByIdempotencyKey(idempotencyKey);
-        if (existing.isPresent()) {
-            Order stored = existing.get();
+        // constraint on the key settles that (see OrderAllocationFacade). A key another flow used is refused.
+        if (idempotencyKeys.isUsedBy(idempotencyKey, IdempotentFlow.ORDER)) {
+            Order stored = orderRepository.findByIdempotencyKey(idempotencyKey).orElseThrow();
             if (!stored.matchesRequestHash(requestHash)) {
                 throw new IdempotencyKeyReusedException(idempotencyKey);
             }
             return stored;
         }
+
+        // Before any stock is touched: a concurrent request with this key waits here, or this one does.
+        idempotencyKeys.claim(idempotencyKey, IdempotentFlow.ORDER);
 
         Order order = new Order(itemId, quantityRequested, idempotencyKey, requestHash);
         OrderAuditService.Snapshot before = orderAudit.snapshot(order);

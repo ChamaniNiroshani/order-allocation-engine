@@ -185,5 +185,6 @@ sequenceDiagram
 | Invalid quantity / unknown item | 400 / 404 | validation error |
 | Duplicate idempotency key, same payload | 200/201 | original result returned |
 | Duplicate idempotency key, different payload | 422 | rejected — see ADR-0002 |
+| Idempotency key already used by another endpoint | 422 | rejected — see ADR-0002 |
 | Insufficient inventory | 409 | order saved as FAILED |
 | Unexpected server error mid-allocation | 500 | generic error, logged server-side |

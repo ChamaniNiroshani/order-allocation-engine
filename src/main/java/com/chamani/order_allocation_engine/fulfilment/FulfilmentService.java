@@ -1,6 +1,8 @@
 package com.chamani.order_allocation_engine.fulfilment;
 
 import com.chamani.order_allocation_engine.exception.IdempotencyKeyReusedException;
+import com.chamani.order_allocation_engine.idempotency.IdempotencyKeys;
+import com.chamani.order_allocation_engine.idempotency.IdempotentFlow;
 import com.chamani.order_allocation_engine.fulfilment.strategy.AllocationPlan;
 import com.chamani.order_allocation_engine.fulfilment.strategy.BatchCandidate;
 import com.chamani.order_allocation_engine.fulfilment.strategy.FulfilmentRequest;
@@ -38,9 +40,12 @@ public class FulfilmentService {
     private final FulfilmentOrderRepository orders;
     private final FulfilmentLineRepository lines;
     private final StrategyRegistry registry;
+    private final IdempotencyKeys idempotencyKeys;
 
     public FulfilmentService(InventoryBatchRepository batches, WarehouseRepository warehouses,
-                             FulfilmentOrderRepository orders, FulfilmentLineRepository lines, StrategyRegistry registry) {
+                             FulfilmentOrderRepository orders, FulfilmentLineRepository lines, StrategyRegistry registry,
+                             IdempotencyKeys idempotencyKeys) {
+        this.idempotencyKeys = idempotencyKeys;
         this.batches = batches;
         this.warehouses = warehouses;
         this.orders = orders;
@@ -63,14 +68,15 @@ public class FulfilmentService {
         String hash = command.requestHash();
 
         // Replay check BEFORE touching stock, so a retried key never decrements twice.
-        var existing = orders.findByIdempotencyKey(command.idempotencyKey());
-        if (existing.isPresent()) {
-            FulfilmentOrder stored = existing.get();
+        if (idempotencyKeys.isUsedBy(command.idempotencyKey(), IdempotentFlow.FULFILMENT)) {
+            FulfilmentOrder stored = orders.findByIdempotencyKey(command.idempotencyKey()).orElseThrow();
             if (!stored.matchesRequestHash(hash)) {
                 throw new IdempotencyKeyReusedException(command.idempotencyKey());
             }
             return FulfilmentDtos.FulfilmentResponse.from(stored, lines.findByFulfilmentOrderIdOrderById(stored.getId()));
         }
+
+        idempotencyKeys.claim(command.idempotencyKey(), IdempotentFlow.FULFILMENT);
 
         FulfilmentOrder order = new FulfilmentOrder(command.sku(), command.quantity(), command.deliveryLat(), command.deliveryLon(),
                 command.customerTier(), strategyType, command.idempotencyKey(), hash);

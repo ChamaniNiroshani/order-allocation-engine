@@ -1,5 +1,7 @@
 package com.chamani.order_allocation_engine.saga;
 
+import com.chamani.order_allocation_engine.idempotency.IdempotencyKeys;
+import com.chamani.order_allocation_engine.idempotency.IdempotentFlow;
 import com.chamani.order_allocation_engine.model.Order;
 import com.chamani.order_allocation_engine.model.OrderStatus;
 import com.chamani.order_allocation_engine.repository.InventoryItemRepository;
@@ -33,11 +35,14 @@ public class CheckoutSteps {
     private final InventoryItemRepository inventoryItemRepository;
     private final StockReservationService stockReservationService;
     private final OrderAuditService orderAudit;
+    private final IdempotencyKeys idempotencyKeys;
 
     public CheckoutSteps(OrderRepository orderRepository,
                          InventoryItemRepository inventoryItemRepository,
                          StockReservationService stockReservationService,
-                         OrderAuditService orderAudit) {
+                         OrderAuditService orderAudit,
+                         IdempotencyKeys idempotencyKeys) {
+        this.idempotencyKeys = idempotencyKeys;
         this.orderRepository = orderRepository;
         this.inventoryItemRepository = inventoryItemRepository;
         this.stockReservationService = stockReservationService;
@@ -46,13 +51,14 @@ public class CheckoutSteps {
 
     /**
      * Step 1: create the order PENDING, reserve the stock, move to RESERVED (or FAILED if there is not
-     * enough). The order is inserted first, so a concurrent request with the same idempotency key hits the
-     * unique constraint before it can reserve anything.
+     * enough). The idempotency key is claimed and the order inserted first, so a concurrent request with the
+     * same key hits the unique constraint before it can reserve anything.
      *
      * @throws IllegalArgumentException if the item does not exist (nothing is saved)
      */
     @Transactional
     public Reservation reserve(UUID itemId, int quantity, String idempotencyKey, String requestHash) {
+        idempotencyKeys.claim(idempotencyKey, IdempotentFlow.CHECKOUT);
         Order order = orderRepository.saveAndFlush(new Order(itemId, quantity, idempotencyKey, requestHash));
         OrderAuditService.Snapshot before = orderAudit.snapshot(order);
 
