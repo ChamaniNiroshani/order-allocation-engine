@@ -85,7 +85,15 @@ public class GlobalExceptionHandler {
      * condition, not a bug. 503 + Retry-After tells the client to try again, instead of a 500 with a stack trace per request.
      * Covers: no connection from the pool (CannotCreateTransactionException, CannotGetJdbcConnectionException), a connection
      * lost mid-request (DataAccessResourceFailureException, JDBCConnectionException) and the raw JDBC form.
-     * Data is safe either way: stock and order changes commit together, so a failed request changed nothing.
+     *
+     * What a 503 says about the data: within one transaction, stock and order changes commit together or not at all.
+     * That does NOT mean a request that got a 503 changed nothing:
+     * - POST /api/checkout commits in several transactions. If the database is lost after the reservation committed, the
+     *   order can stay RESERVED (stock held, possibly already charged) or PAID (charged, not confirmed). The expiry job
+     *   picks these up once they are older than checkout.reservation-ttl: a RESERVED order is expired, its stock
+     *   released and a refund requested (a failed refund is not retried, issue #28); a PAID order is confirmed.
+     * - For any request, if the connection drops during a commit, the client cannot know whether it committed. On the
+     *   endpoints that take an Idempotency-Key, a retry with the same key does not apply the request twice.
      */
     @ExceptionHandler({CannotCreateTransactionException.class, DataAccessResourceFailureException.class,
             JDBCConnectionException.class, SQLTransientConnectionException.class})
