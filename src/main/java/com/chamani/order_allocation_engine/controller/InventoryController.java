@@ -36,6 +36,7 @@ public class InventoryController {
     @ApiResponse(responseCode = "201", description = "Item created",
             content = @Content(schema = @Schema(implementation = InventoryResponse.class)))
     @ApiResponse(responseCode = "400", ref = OpenApiConfig.BAD_REQUEST)
+    @ApiResponse(responseCode = "415", ref = OpenApiConfig.UNSUPPORTED_MEDIA_TYPE)
     @ApiResponse(responseCode = "503", ref = OpenApiConfig.UNAVAILABLE)
     @PostMapping
     public ResponseEntity<InventoryResponse> create(@Valid @RequestBody CreateInventoryRequest request) {

@@ -30,6 +30,7 @@ public class BatchController {
     @ApiResponse(responseCode = "201", description = "Batch created",
             content = @Content(schema = @Schema(implementation = FulfilmentDtos.BatchResponse.class)))
     @ApiResponse(responseCode = "400", ref = OpenApiConfig.BAD_REQUEST)
+    @ApiResponse(responseCode = "415", ref = OpenApiConfig.UNSUPPORTED_MEDIA_TYPE)
     @ApiResponse(responseCode = "404", ref = OpenApiConfig.NOT_FOUND)
     @ApiResponse(responseCode = "503", ref = OpenApiConfig.UNAVAILABLE)
     @PostMapping

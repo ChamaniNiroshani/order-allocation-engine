@@ -6,6 +6,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.chamani.order_allocation_engine.controller.OrderController;
 import com.chamani.order_allocation_engine.exception.GlobalExceptionHandler;
+import com.chamani.order_allocation_engine.model.Order;
 import com.chamani.order_allocation_engine.service.OrderAllocationFacade;
 import com.chamani.order_allocation_engine.service.OrderQueryService;
 import org.junit.jupiter.api.AfterEach;
@@ -15,17 +16,25 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.util.UUID;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.startsWith;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -46,8 +55,12 @@ class ClientErrorHandlerTest {
     private final Logger handlerLogger = (Logger) LoggerFactory.getLogger(GlobalExceptionHandler.class);
     private final ListAppender<ILoggingEvent> appender = new ListAppender<>();
 
+    private Level originalLevel;
+
     @BeforeEach
     void captureLogs() {
+        originalLevel = handlerLogger.getLevel();
+        handlerLogger.setLevel(Level.DEBUG);
         appender.start();
         handlerLogger.addAppender(appender);
     }
@@ -55,6 +68,7 @@ class ClientErrorHandlerTest {
     @AfterEach
     void releaseLogs() {
         handlerLogger.detachAppender(appender);
+        handlerLogger.setLevel(originalLevel);
     }
 
     private void assertNothingLoggedAtErrorOrWarn() {
@@ -95,6 +109,50 @@ class ClientErrorHandlerTest {
                 .andExpect(jsonPath("$.message").exists())
                 .andExpect(jsonPath("$.timestamp").exists());
         assertNothingLoggedAtErrorOrWarn();
+    }
+
+    @Test
+    void unsupportedContentType_returns415_beforeAnythingRuns() throws Exception {
+        mockMvc.perform(post("/api/orders")
+                        .header("Idempotency-Key", "k-3")
+                        .contentType(MediaType.TEXT_PLAIN)
+                        .content("itemId=1"))
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(header().string(HttpHeaders.ACCEPT, containsString(MediaType.APPLICATION_JSON_VALUE)))
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.status").value(415))
+                .andExpect(jsonPath("$.error").value("Unsupported Media Type"))
+                .andExpect(jsonPath("$.message").value(startsWith("Content type 'text/plain")))
+                .andExpect(jsonPath("$.timestamp").exists());
+        verifyNoInteractions(facade);
+        assertNothingLoggedAtErrorOrWarn();
+        assertThat(appender.list).anyMatch(e -> e.getLevel() == Level.DEBUG);
+    }
+
+    @Test
+    void missingContentType_returns415() throws Exception {
+        mockMvc.perform(post("/api/orders").header("Idempotency-Key", "k-4").content("{}"))
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.status").value(415));
+        verifyNoInteractions(facade);
+        assertNothingLoggedAtErrorOrWarn();
+    }
+
+    /** The error body is JSON even though the client asked for something else: it is the only format there is. */
+    @Test
+    void unacceptableResponseType_returns406() throws Exception {
+        UUID orderId = UUID.randomUUID();
+        when(orderQueryService.get(orderId)).thenReturn(new Order(UUID.randomUUID(), 1, "k-5", "hash"));
+
+        mockMvc.perform(get("/api/orders/{id}", orderId).accept(MediaType.APPLICATION_XML))
+                .andExpect(status().isNotAcceptable())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.status").value(406))
+                .andExpect(jsonPath("$.error").value("Not Acceptable"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.timestamp").exists());
+        assertNothingLoggedAtErrorOrWarn();
+        assertThat(appender.list).anyMatch(e -> e.getLevel() == Level.DEBUG);
     }
 
     @Test

@@ -30,6 +30,7 @@ public class WarehouseController {
     @ApiResponse(responseCode = "201", description = "Warehouse created",
             content = @Content(schema = @Schema(implementation = FulfilmentDtos.WarehouseResponse.class)))
     @ApiResponse(responseCode = "400", ref = OpenApiConfig.BAD_REQUEST)
+    @ApiResponse(responseCode = "415", ref = OpenApiConfig.UNSUPPORTED_MEDIA_TYPE)
     @ApiResponse(responseCode = "503", ref = OpenApiConfig.UNAVAILABLE)
     @PostMapping
     public ResponseEntity<FulfilmentDtos.WarehouseResponse> create(@Valid @RequestBody FulfilmentDtos.CreateWarehouseRequest request) {
