@@ -5,7 +5,8 @@ request twice.**
 
 [![CI](https://github.com/ChamaniNiroshani/order-allocation-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/ChamaniNiroshani/order-allocation-engine/actions/workflows/ci.yml)
 
-In 72 benchmark runs with three locking strategies, **none oversold** ([benchmarks](docs/benchmarks.md)). In a database
+All three locking strategies are tested with **twice as much ordered at once as is in stock, and none may oversell**
+([test](src/test/java/com/chamani/order_allocation_engine/AbstractAllocationConcurrencyTest.java)). In a database
 outage test, the slowest request went from **26.1 s to 3.1 s** after the fixes ([chaos report](docs/chaos.md)). All
 numbers come from one loaded laptop: they compare designs, not capacity.
 
@@ -62,6 +63,8 @@ API: `POST /api/orders`, `POST /api/checkout`, `POST /api/fulfilments`, document
 - **Read these as comparisons.** Measured on 2026-11-18 on a loaded laptop (i3-1305U, 7.7 GB) running the app, Postgres
   and k6 together, on Java 26 (the project targets 21). Some min-max ranges overlap. The saga, observability and
   per-endpoint key table were added later, and it was not re-measured.
+- The stock checks held in all 72 runs, but stock was set so high that it **never ran out**: the benchmark measures
+  speed, and the tests cover running out.
 - Method, full tables and limits: [docs/benchmarks.md](docs/benchmarks.md).
 
 ## Architecture
