@@ -51,18 +51,25 @@ to a feature branch, change the branch to `main` after merging, before deleting 
 ### Startup time on a fraction of a CPU
 
 Startup is the main risk on this plan. Simulated on 2026-11-27 on the loaded development laptop: the production image
-with `render.yaml`'s variables, limited by Docker to 512 MB and 0.1 CPU, against an empty local Postgres.
+with `render.yaml`'s variables, limited by Docker to 512 MB and 0.1 CPU, against an empty local Postgres. One run per
+variant, back to back, from the same application code. Readiness was polled with a 5 s limit per request, like Render's
+health check.
 
-| | Result |
-|---|---|
-| Spring reports "Started" | after 700 s (including the five migrations of an empty database) |
-| First successful readiness answer | about 1,203 s after the container started |
-| Readiness once warm | about 1 s |
-| Memory after the smoke test | 297 MiB of 512 MiB; not killed, no restarts |
-| Smoke test | all checks passed |
+| | Without CDS | **CDS (in the image)** | CDS + lazy initialization |
+|---|---|---|---|
+| Spring reports "Started" | 562 s | **387 s** | 371 s |
+| Readiness first answers, from `docker run` | 604 s | **433 s** | 422 s |
+| Smoke test run right afterwards (all 13 checks passed each time) | 205 s | 237 s | 267 s |
+| Memory after the smoke test, of 512 MiB | 307 MiB | **260 MiB** | 257 MiB |
+
+- **Class data sharing (CDS)** is built into the [`Dockerfile`](../Dockerfile): a training run during the image build
+  saves the classes the application loads. It makes the image larger (556 MB to 672 MB in `docker images`).
+- **Lazy initialization is not used.** It was ready 11 s sooner, but the smoke test then took 30 s longer.
+- The target of starting in about 3 minutes was **not** reached.
 
 This is **not** a measurement of Render: a hard Docker CPU limit on a busy laptop may be much slower or faster than
-Render's 0.1 CPU. If it were representative, a first deploy would exceed Render's 15-minute limit.
+Render's 0.1 CPU. Single runs also vary: an earlier run without CDS, on older code, took 700 s to start and about
+1,203 s to answer readiness, which is over Render's 15-minute limit. Only the deploy on Render will show the real time.
 
 ## 3. Check it
 
