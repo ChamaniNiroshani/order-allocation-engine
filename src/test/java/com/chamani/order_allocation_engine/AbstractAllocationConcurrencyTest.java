@@ -15,6 +15,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -189,6 +190,29 @@ abstract class AbstractAllocationConcurrencyTest {
             assertEquals(0, remaining);
             assertEquals(stock, allocatedInDb(itemId) + remaining, "sum(allocated) + remaining == initial stock");
         }
+    }
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
+    /**
+     * The forced version of the race above, in every locking mode: both requests have passed the replay check before
+     * either commits (see LockRace). Stock is enough for one, so the loser must get the winner's order, not a rejection.
+     */
+    @Test
+    void sameKey_bothPastTheReplayCheck_oneOrder_andStockIsTakenOnce() throws Exception {
+        UUID itemId = inventoryItemRepository.save(new InventoryItem(10)).getItemId();
+        String key = "junit-forced-race-" + UUID.randomUUID();
+
+        List<Order> orders = LockRace.run(transactionManager, jdbc,
+                "SELECT item_id FROM inventory_item WHERE item_id = ? FOR UPDATE", itemId, 2,
+                () -> allocationFacade.allocate(itemId, 10, key));
+
+        assertEquals(orders.get(0).getOrderId(), orders.get(1).getOrderId());
+        assertEquals(OrderStatus.ALLOCATED, orders.get(0).getStatus());
+        assertEquals(OrderStatus.ALLOCATED, orders.get(1).getStatus());
+        assertEquals(10, allocatedInDb(itemId), "allocated once");
+        assertEquals(0, inventoryItemRepository.findById(itemId).orElseThrow().getQuantityAvailable());
     }
 
     @Test
