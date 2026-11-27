@@ -55,6 +55,7 @@ public class FulfilmentController {
     @ApiResponse(responseCode = "409", description = "Rejected: not enough usable stock. The order is stored as FAILED",
             content = @Content(schema = @Schema(implementation = FulfilmentDtos.FulfilmentResponse.class)))
     @ApiResponse(responseCode = "400", ref = OpenApiConfig.BAD_REQUEST)
+    @ApiResponse(responseCode = "415", ref = OpenApiConfig.UNSUPPORTED_MEDIA_TYPE)
     @ApiResponse(responseCode = "422", ref = OpenApiConfig.KEY_REUSED)
     @ApiResponse(responseCode = "503", ref = OpenApiConfig.UNAVAILABLE)
     @PostMapping

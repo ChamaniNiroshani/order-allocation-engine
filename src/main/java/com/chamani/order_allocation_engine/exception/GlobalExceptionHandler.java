@@ -9,10 +9,13 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.HttpMediaTypeNotAcceptableException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingRequestHeaderException;
@@ -143,6 +146,34 @@ public class GlobalExceptionHandler {
         }
         return ResponseEntity.status(response.getStatusCode())
                 .allow(allowed.toArray(new org.springframework.http.HttpMethod[0]))
+                .body(response.getBody());
+    }
+
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<Map<String, Object>> handleUnsupportedMediaType(HttpMediaTypeNotSupportedException ex) {
+        log.debug("Unsupported media type: {}", ex.getMessage());
+        var supported = ex.getSupportedMediaTypes();
+        ResponseEntity<Map<String, Object>> response = buildResponse(HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+                (ex.getContentType() == null ? "Content type is not supported"
+                        : "Content type '" + ex.getContentType() + "' is not supported") + ". Send application/json");
+        return ResponseEntity.status(response.getStatusCode())
+                .headers(headers -> {
+                    if (!supported.isEmpty()) {
+                        headers.setAccept(supported);
+                    }
+                })
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(response.getBody());
+    }
+
+    /** The content type is set explicitly: negotiating it against the Accept header that just failed would leave no body. */
+    @ExceptionHandler(HttpMediaTypeNotAcceptableException.class)
+    public ResponseEntity<Map<String, Object>> handleNotAcceptable(HttpMediaTypeNotAcceptableException ex) {
+        log.debug("Not acceptable: {}", ex.getMessage());
+        ResponseEntity<Map<String, Object>> response = buildResponse(HttpStatus.NOT_ACCEPTABLE,
+                "This API only returns application/json");
+        return ResponseEntity.status(response.getStatusCode())
+                .contentType(MediaType.APPLICATION_JSON)
                 .body(response.getBody());
     }
 

@@ -41,15 +41,15 @@ class OpenApiDocsTest {
     @Test
     void everyEndpointIsDescribed_withItsTagAndOnlyItsOwnStatusCodes() throws Exception {
         Map<String, String> expected = new TreeMap<>(Map.ofEntries(
-                Map.entry("post /api/orders", "orders [201, 400, 404, 409, 422, 503]"),
+                Map.entry("post /api/orders", "orders [201, 400, 404, 409, 415, 422, 503]"),
                 Map.entry("get /api/orders/{id}", "orders [200, 400, 404, 503]"),
                 Map.entry("get /api/orders/{id}/history", "orders [200, 400, 404, 503]"),
-                Map.entry("post /api/checkout", "checkout [201, 202, 400, 402, 404, 409, 422, 502, 503]"),
-                Map.entry("post /api/fulfilments", "fulfilment [201, 400, 409, 422, 503]"),
+                Map.entry("post /api/checkout", "checkout [201, 202, 400, 402, 404, 409, 415, 422, 502, 503]"),
+                Map.entry("post /api/fulfilments", "fulfilment [201, 400, 409, 415, 422, 503]"),
                 Map.entry("get /api/fulfilments/{id}", "fulfilment [200, 400, 404, 503]"),
-                Map.entry("post /api/warehouses", "fulfilment [201, 400, 503]"),
-                Map.entry("post /api/batches", "fulfilment [201, 400, 404, 503]"),
-                Map.entry("post /api/inventory", "inventory [201, 400, 503]"),
+                Map.entry("post /api/warehouses", "fulfilment [201, 400, 415, 503]"),
+                Map.entry("post /api/batches", "fulfilment [201, 400, 404, 415, 503]"),
+                Map.entry("post /api/inventory", "inventory [201, 400, 415, 503]"),
                 Map.entry("get /api/inventory/{id}", "inventory [200, 400, 404, 503]")));
 
         Map<String, String> actual = new TreeMap<>();

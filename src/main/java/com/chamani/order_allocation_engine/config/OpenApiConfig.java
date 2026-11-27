@@ -35,6 +35,7 @@ public class OpenApiConfig {
     private static final String RESPONSES = "#/components/responses/";
     public static final String BAD_REQUEST = RESPONSES + "BadRequest";
     public static final String NOT_FOUND = RESPONSES + "NotFound";
+    public static final String UNSUPPORTED_MEDIA_TYPE = RESPONSES + "UnsupportedMediaType";
     public static final String KEY_REUSED = RESPONSES + "IdempotencyKeyReused";
     public static final String UNAVAILABLE = RESPONSES + "ServiceUnavailable";
 
@@ -61,6 +62,7 @@ public class OpenApiConfig {
                         .addSchemas(ERROR_SCHEMA, errorSchema())
                         .addResponses("BadRequest", error("Invalid input: a missing or invalid header, field, path value or body"))
                         .addResponses("NotFound", error("A referenced resource does not exist"))
+                        .addResponses("UnsupportedMediaType", error("The request body must be application/json"))
                         .addResponses("IdempotencyKeyReused",
                                 error("The Idempotency-Key was already used with a different request"))
                         .addResponses("ServiceUnavailable", error("Temporarily unavailable: the database cannot be reached "

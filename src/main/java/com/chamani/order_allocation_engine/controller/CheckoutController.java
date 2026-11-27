@@ -48,6 +48,7 @@ public class CheckoutController {
     @ApiResponse(responseCode = "502", description = "Payment timed out: a refund was requested, the order is CANCELLED and the stock released",
             content = @Content(schema = @Schema(implementation = OrderResponse.class)))
     @ApiResponse(responseCode = "400", ref = OpenApiConfig.BAD_REQUEST)
+    @ApiResponse(responseCode = "415", ref = OpenApiConfig.UNSUPPORTED_MEDIA_TYPE)
     @ApiResponse(responseCode = "404", ref = OpenApiConfig.NOT_FOUND)
     @ApiResponse(responseCode = "422", ref = OpenApiConfig.KEY_REUSED)
     @ApiResponse(responseCode = "503", ref = OpenApiConfig.UNAVAILABLE)
