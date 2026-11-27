@@ -1,5 +1,10 @@
 # Architecture
 
+> **Superseded (2026-11-27).** This is an early design document and parts of it are no longer true: for example, it
+> describes optimistic locking as not built. For the current design see the
+> [Architecture section of the README](../README.md#architecture) and the
+> [decision records](adr/README.md). It is kept as it was, for history.
+
 ## 1. Component Overview
 
 ```mermaid
