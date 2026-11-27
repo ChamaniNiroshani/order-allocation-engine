@@ -1,0 +1,29 @@
+# Render Blueprint (https://render.com/docs/blueprint-spec). Setup steps: docs/deploy.md.
+# The database is not here: it is a Neon project, created by hand.
+services:
+  - type: web
+    name: order-allocation-engine
+    runtime: docker
+    plan: free
+    region: singapore                      # cannot be changed after the service is created; use the same region in Neon
+    # No "branch": the service follows the branch the Blueprint is linked to.
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /actuator/health/readiness
+    autoDeployTrigger: checksPass          # deploy a new commit only after CI passes
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: prod
+      - key: SPRING_DOCKER_COMPOSE_ENABLED
+        value: "false"
+      # 512 MB in total. Replaces the Dockerfile's heap at 75% of memory: half leaves room for the JVM's own memory,
+      # and the serial collector has the lowest overhead on a fraction of a CPU.
+      - key: JAVA_TOOL_OPTIONS
+        value: "-XX:MaxRAMPercentage=50 -XX:+UseSerialGC"
+      # Secrets: Render asks for them when the Blueprint is first created. Never put values in this file.
+      - key: SPRING_DATASOURCE_URL
+        sync: false
+      - key: SPRING_DATASOURCE_USERNAME
+        sync: false
+      - key: SPRING_DATASOURCE_PASSWORD
+        sync: false
