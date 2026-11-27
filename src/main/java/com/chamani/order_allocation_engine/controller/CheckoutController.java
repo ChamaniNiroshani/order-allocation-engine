@@ -1,5 +1,11 @@
 package com.chamani.order_allocation_engine.controller;
 
+import com.chamani.order_allocation_engine.config.OpenApiConfig;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import com.chamani.order_allocation_engine.dto.CreateOrderRequest;
 import com.chamani.order_allocation_engine.dto.OrderResponse;
 import com.chamani.order_allocation_engine.model.Order;
@@ -19,6 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
  * Checkout saga, run synchronously. Same request and Idempotency-Key convention as POST /api/orders.
  * 201 confirmed, 409 insufficient stock, 402 payment declined, 502 payment timeout; the body is always the order.
  */
+@Tag(name = OpenApiConfig.TAG_CHECKOUT)
 @RestController
 @RequestMapping("/api/checkout")
 public class CheckoutController {
@@ -29,6 +36,21 @@ public class CheckoutController {
         this.orchestrator = orchestrator;
     }
 
+    @Operation(summary = "Check out: reserve stock, charge, then confirm or compensate (idempotent)")
+    @ApiResponse(responseCode = "201", description = "Paid and confirmed",
+            content = @Content(schema = @Schema(implementation = OrderResponse.class)))
+    @ApiResponse(responseCode = "202", description = "A replay of a key whose checkout is still in progress",
+            content = @Content(schema = @Schema(implementation = OrderResponse.class)))
+    @ApiResponse(responseCode = "402", description = "Payment declined: the order is CANCELLED and the stock released",
+            content = @Content(schema = @Schema(implementation = OrderResponse.class)))
+    @ApiResponse(responseCode = "409", description = "Not enough stock (FAILED), or the reservation expired (EXPIRED)",
+            content = @Content(schema = @Schema(implementation = OrderResponse.class)))
+    @ApiResponse(responseCode = "502", description = "Payment timed out: a refund was requested, the order is CANCELLED and the stock released",
+            content = @Content(schema = @Schema(implementation = OrderResponse.class)))
+    @ApiResponse(responseCode = "400", ref = OpenApiConfig.BAD_REQUEST)
+    @ApiResponse(responseCode = "404", ref = OpenApiConfig.NOT_FOUND)
+    @ApiResponse(responseCode = "422", ref = OpenApiConfig.KEY_REUSED)
+    @ApiResponse(responseCode = "503", ref = OpenApiConfig.UNAVAILABLE)
     @PostMapping
     public ResponseEntity<OrderResponse> checkout(
             @RequestHeader("Idempotency-Key") @NotBlank @Size(max = 255) String idempotencyKey,
