@@ -1,5 +1,11 @@
 package com.chamani.order_allocation_engine.controller;
 
+import com.chamani.order_allocation_engine.config.OpenApiConfig;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import com.chamani.order_allocation_engine.dto.CreateOrderRequest;
 import com.chamani.order_allocation_engine.dto.HistoryEntryResponse;
 import com.chamani.order_allocation_engine.dto.OrderResponse;
@@ -24,6 +30,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 import java.util.UUID;
 
+@Tag(name = OpenApiConfig.TAG_ORDERS)
 @RestController
 @RequestMapping("/api/orders")
 public class OrderController {
@@ -39,6 +46,11 @@ public class OrderController {
         this.objectMapper = objectMapper;
     }
 
+    @Operation(summary = "Get an order's audit trail, oldest first")
+    @ApiResponse(responseCode = "200", description = "The audit entries")
+    @ApiResponse(responseCode = "400", ref = OpenApiConfig.BAD_REQUEST)
+    @ApiResponse(responseCode = "404", ref = OpenApiConfig.NOT_FOUND)
+    @ApiResponse(responseCode = "503", ref = OpenApiConfig.UNAVAILABLE)
     @GetMapping("/{id}/history")
     public List<HistoryEntryResponse> history(@PathVariable UUID id) {
         return orderQueryService.history(id).stream()
@@ -46,11 +58,26 @@ public class OrderController {
                 .toList();
     }
 
+    @Operation(summary = "Get an order")
+    @ApiResponse(responseCode = "200", description = "The order",
+            content = @Content(schema = @Schema(implementation = OrderResponse.class)))
+    @ApiResponse(responseCode = "400", ref = OpenApiConfig.BAD_REQUEST)
+    @ApiResponse(responseCode = "404", ref = OpenApiConfig.NOT_FOUND)
+    @ApiResponse(responseCode = "503", ref = OpenApiConfig.UNAVAILABLE)
     @GetMapping("/{id}")
     public OrderResponse getOrder(@PathVariable UUID id) {
         return OrderResponse.from(orderQueryService.get(id));
     }
 
+    @Operation(summary = "Allocate stock for an order (direct flow, idempotent)")
+    @ApiResponse(responseCode = "201", description = "Stock allocated",
+            content = @Content(schema = @Schema(implementation = OrderResponse.class)))
+    @ApiResponse(responseCode = "409", description = "Rejected: not enough stock. The order is stored as FAILED",
+            content = @Content(schema = @Schema(implementation = OrderResponse.class)))
+    @ApiResponse(responseCode = "400", ref = OpenApiConfig.BAD_REQUEST)
+    @ApiResponse(responseCode = "404", ref = OpenApiConfig.NOT_FOUND)
+    @ApiResponse(responseCode = "422", ref = OpenApiConfig.KEY_REUSED)
+    @ApiResponse(responseCode = "503", ref = OpenApiConfig.UNAVAILABLE)
     @PostMapping
     public ResponseEntity<OrderResponse> createOrder(
             @RequestHeader("Idempotency-Key") @NotBlank @Size(max = 255) String idempotencyKey,
