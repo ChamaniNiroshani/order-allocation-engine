@@ -2,6 +2,8 @@ package com.chamani.order_allocation_engine.service;
 
 import com.chamani.order_allocation_engine.concurrency.OptimisticRetryExecutor;
 import com.chamani.order_allocation_engine.exception.IdempotencyKeyReusedException;
+import com.chamani.order_allocation_engine.idempotency.IdempotencyKeys;
+import com.chamani.order_allocation_engine.idempotency.IdempotentFlow;
 import com.chamani.order_allocation_engine.logging.OrderEvents;
 import com.chamani.order_allocation_engine.metrics.AllocationMetrics;
 import com.chamani.order_allocation_engine.model.Order;
@@ -24,9 +26,12 @@ public class OrderAllocationFacade {
     private final OrderRepository orderRepository;
     private final OptimisticRetryExecutor optimisticRetry;
     private final AllocationMetrics metrics;
+    private final IdempotencyKeys idempotencyKeys;
 
     public OrderAllocationFacade(AllocationService allocationService, OrderRepository orderRepository,
-                                 OptimisticRetryExecutor optimisticRetry, AllocationMetrics metrics) {
+                                 OptimisticRetryExecutor optimisticRetry, AllocationMetrics metrics,
+                                 IdempotencyKeys idempotencyKeys) {
+        this.idempotencyKeys = idempotencyKeys;
         this.allocationService = allocationService;
         this.orderRepository = orderRepository;
         this.optimisticRetry = optimisticRetry;
@@ -44,6 +49,7 @@ public class OrderAllocationFacade {
             return optimisticRetry.execute(
                     () -> allocationService.allocate(itemId, quantityRequested, idempotencyKey));
         } catch (DataIntegrityViolationException e) {
+            idempotencyKeys.isUsedBy(idempotencyKey, IdempotentFlow.ORDER);   // refuses if another flow won the key
             Order stored = orderRepository.findByIdempotencyKey(idempotencyKey).orElseThrow(() -> e);
             OrderEvents.idempotentReplay(OrderEvents.FLOW_DIRECT, stored.getOrderId());
             if (!stored.matchesRequestHash(RequestHash.of(itemId, quantityRequested))) {

@@ -1,6 +1,8 @@
 package com.chamani.order_allocation_engine.saga;
 
 import com.chamani.order_allocation_engine.exception.IdempotencyKeyReusedException;
+import com.chamani.order_allocation_engine.idempotency.IdempotencyKeys;
+import com.chamani.order_allocation_engine.idempotency.IdempotentFlow;
 import com.chamani.order_allocation_engine.logging.OrderEvents;
 import com.chamani.order_allocation_engine.logging.OrderMdc;
 import com.chamani.order_allocation_engine.metrics.AllocationMetrics;
@@ -58,12 +60,15 @@ public class CheckoutOrchestrator {
     private final OrderRepository orderRepository;
     private final AllocationMetrics metrics;
     private final ObservationRegistry observations;
+    private final IdempotencyKeys idempotencyKeys;
     private final Duration paymentTimeout;
     /** Runs the charge call so the saga can stop waiting for it. One cheap virtual thread per call. */
     private final ExecutorService paymentCalls = Executors.newVirtualThreadPerTaskExecutor();
 
     public CheckoutOrchestrator(CheckoutSteps steps, PaymentGateway paymentGateway, OrderRepository orderRepository,
-                                AllocationMetrics metrics, ObservationRegistry observations, PaymentProperties paymentProperties) {
+                                AllocationMetrics metrics, ObservationRegistry observations, PaymentProperties paymentProperties,
+                                IdempotencyKeys idempotencyKeys) {
+        this.idempotencyKeys = idempotencyKeys;
         this.steps = steps;
         this.paymentGateway = paymentGateway;
         this.orderRepository = orderRepository;
@@ -109,9 +114,9 @@ public class CheckoutOrchestrator {
         String requestHash = RequestHash.of(itemId, quantity);
 
         // 0. Idempotency: a known key returns its stored order as-is. No new reservation, no new charge.
-        var existing = orderRepository.findByIdempotencyKey(idempotencyKey);
-        if (existing.isPresent()) {
-            return replay(existing.get(), requestHash, idempotencyKey);
+        // A key another flow used is refused: a direct order must never be answered as a (paid) checkout.
+        if (idempotencyKeys.isUsedBy(idempotencyKey, IdempotentFlow.CHECKOUT)) {
+            return replay(orderRepository.findByIdempotencyKey(idempotencyKey).orElseThrow(), requestHash, idempotencyKey);
         }
 
         // 1. Reserve stock (own transaction, commits).
@@ -120,7 +125,8 @@ public class CheckoutOrchestrator {
             reservation = observe(STEP_RESERVE, "item.id", itemId,
                     () -> steps.reserve(itemId, quantity, idempotencyKey, requestHash));
         } catch (DataIntegrityViolationException e) {
-            // A concurrent request with the same key inserted its order first; ours rolled back, nothing is reserved.
+            // A concurrent request with the same key committed first; ours rolled back, nothing is reserved.
+            idempotencyKeys.isUsedBy(idempotencyKey, IdempotentFlow.CHECKOUT);   // refuses if another flow won the key
             Order stored = orderRepository.findByIdempotencyKey(idempotencyKey).orElseThrow(() -> e);
             OrderEvents.idempotentReplay(OrderEvents.FLOW_CHECKOUT, stored.getOrderId());
             return replay(stored, requestHash, idempotencyKey);

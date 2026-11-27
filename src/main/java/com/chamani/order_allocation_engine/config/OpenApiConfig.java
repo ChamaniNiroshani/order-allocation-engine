@@ -64,7 +64,7 @@ public class OpenApiConfig {
                         .addResponses("NotFound", error("A referenced resource does not exist"))
                         .addResponses("UnsupportedMediaType", error("The request body must be application/json"))
                         .addResponses("IdempotencyKeyReused",
-                                error("The Idempotency-Key was already used with a different request"))
+                                error("The Idempotency-Key was already used with a different request, or by another endpoint"))
                         .addResponses("ServiceUnavailable", error("Temporarily unavailable: the database cannot be reached "
                                 + "or, for POST /api/orders in OPTIMISTIC mode, every lock retry lost. Retry later.")
                                 .addHeaderObject("Retry-After", new Header()

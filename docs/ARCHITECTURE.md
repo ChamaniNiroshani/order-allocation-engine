@@ -57,7 +57,9 @@ See ADR-0002 for the full decision. In short: each order carries a
 client-supplied `Idempotency-Key`, scoped together with a SHA-256 hash of
 the request payload (`itemId` + `quantityRequested`). A retry with the
 same key and the same payload returns the original order; a retry with
-the same key and a *different* payload is rejected with `422`.
+the same key and a *different* payload is rejected with `422`. A key also
+belongs to the endpoint that used it first (orders, checkout or
+fulfilments); on another one it is rejected with `422`.
 
 ## 5. Deployment
 

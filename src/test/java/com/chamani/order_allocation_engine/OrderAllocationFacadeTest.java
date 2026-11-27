@@ -4,6 +4,7 @@ import com.chamani.order_allocation_engine.exception.IdempotencyKeyReusedExcepti
 import com.chamani.order_allocation_engine.concurrency.AllocationProperties;
 import com.chamani.order_allocation_engine.concurrency.LockingMode;
 import com.chamani.order_allocation_engine.concurrency.OptimisticRetryExecutor;
+import com.chamani.order_allocation_engine.idempotency.IdempotencyKeys;
 import com.chamani.order_allocation_engine.metrics.AllocationMetrics;
 import com.chamani.order_allocation_engine.model.Order;
 import com.chamani.order_allocation_engine.repository.OrderRepository;
@@ -42,6 +43,9 @@ class OrderAllocationFacadeTest {
 
     @Spy
     private AllocationMetrics metrics = new AllocationMetrics(new SimpleMeterRegistry(), new AllocationProperties(LockingMode.PESSIMISTIC));
+
+    @Mock
+    private IdempotencyKeys idempotencyKeys;
 
     @InjectMocks
     private OrderAllocationFacade facade;
