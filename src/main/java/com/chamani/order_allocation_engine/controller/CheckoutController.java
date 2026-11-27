@@ -14,6 +14,7 @@ import com.chamani.order_allocation_engine.saga.CheckoutOutcomes;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -52,7 +53,7 @@ public class CheckoutController {
     @ApiResponse(responseCode = "404", ref = OpenApiConfig.NOT_FOUND)
     @ApiResponse(responseCode = "422", ref = OpenApiConfig.KEY_REUSED)
     @ApiResponse(responseCode = "503", ref = OpenApiConfig.UNAVAILABLE)
-    @PostMapping
+    @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<OrderResponse> checkout(
             @RequestHeader("Idempotency-Key") @NotBlank @Size(max = 255) String idempotencyKey,
             @Valid @RequestBody CreateOrderRequest request) {

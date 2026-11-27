@@ -8,6 +8,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -33,7 +34,7 @@ public class BatchController {
     @ApiResponse(responseCode = "415", ref = OpenApiConfig.UNSUPPORTED_MEDIA_TYPE)
     @ApiResponse(responseCode = "404", ref = OpenApiConfig.NOT_FOUND)
     @ApiResponse(responseCode = "503", ref = OpenApiConfig.UNAVAILABLE)
-    @PostMapping
+    @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<FulfilmentDtos.BatchResponse> create(@Valid @RequestBody FulfilmentDtos.CreateBatchRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(FulfilmentDtos.BatchResponse.from(catalog.createBatch(request)));

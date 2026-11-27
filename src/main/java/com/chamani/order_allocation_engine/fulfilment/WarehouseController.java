@@ -8,6 +8,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -32,7 +33,7 @@ public class WarehouseController {
     @ApiResponse(responseCode = "400", ref = OpenApiConfig.BAD_REQUEST)
     @ApiResponse(responseCode = "415", ref = OpenApiConfig.UNSUPPORTED_MEDIA_TYPE)
     @ApiResponse(responseCode = "503", ref = OpenApiConfig.UNAVAILABLE)
-    @PostMapping
+    @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<FulfilmentDtos.WarehouseResponse> create(@Valid @RequestBody FulfilmentDtos.CreateWarehouseRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(FulfilmentDtos.WarehouseResponse.from(catalog.createWarehouse(request)));
