@@ -9,14 +9,19 @@ import com.chamani.order_allocation_engine.repository.OrderRepository;
 import com.chamani.order_allocation_engine.repository.InventoryItemRepository;
 import com.chamani.order_allocation_engine.service.AllocationService;
 import com.chamani.order_allocation_engine.service.OrderAllocationFacade;
+import com.zaxxer.hikari.HikariDataSource;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
 
+import javax.sql.DataSource;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -136,8 +141,36 @@ abstract class AbstractAllocationConcurrencyTest {
         assertEquals(stock, allocatedQuantity + remaining, "sum(allocated) + remaining == initial stock");
     }
 
+    @Autowired
+    private DataSource dataSource;
+
+    private Long normalConnectionTimeout;
+
+    /**
+     * Changes how long a caller waits for a pooled connection, on the running pool, until the test ends. Reflection,
+     * because the pool copies the setting into this field when it starts and ignores later changes to its
+     * configuration. A test-wide property would also change every other test of this suite.
+     */
+    private void setConnectionTimeoutForThisTest(long millis) throws SQLException {
+        Object pool = ReflectionTestUtils.getField(dataSource.unwrap(HikariDataSource.class), "pool");
+        normalConnectionTimeout = (Long) ReflectionTestUtils.getField(pool, "connectionTimeout");
+        ReflectionTestUtils.setField(pool, "connectionTimeout", millis);
+    }
+
+    @AfterEach
+    void restoreConnectionTimeout() throws SQLException {
+        if (normalConnectionTimeout != null) {
+            setConnectionTimeoutForThisTest(normalConnectionTimeout);
+            normalConnectionTimeout = null;
+        }
+    }
+
     @Test
     void manyItemsLowContention_allocateExactly_andKeepStockInvariant() throws Exception {
+        // 16 threads share 10 connections, so some always wait. With the usual 3 s limit, a stall of the machine fails
+        // the test although nothing is wrong with the allocation, which is what this test is about.
+        setConnectionTimeoutForThisTest(30_000);
+
         final int items = 50;
         final int stock = 10;
         final int quantityPerOrder = 5;
