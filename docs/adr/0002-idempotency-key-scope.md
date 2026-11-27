@@ -39,10 +39,27 @@ Each `Order` stores a `requestHash` (SHA-256 of `itemId` +
   for the insufficient-inventory business outcome, ADR-0001) or a generic
   `400`.
 
-The idempotency lookup happens *after* the row lock (`SELECT ... FOR
-UPDATE`) is acquired on the inventory item, so two concurrent requests
-with the same key and the same payload don't race to create two orders —
-the second one waits for the first to commit, then finds and returns it.
+The idempotency lookup happens *before* any stock is locked or changed. It
+does not by itself stop a race: two concurrent first requests with the same
+key can both find nothing. The unique constraint on `idempotency_key`
+settles that. Only one order can commit. The other request's transaction
+rolls back, together with any stock change it made, and the caller
+(`OrderAllocationFacade`, outside that transaction) reads the stored order,
+checks its hash, and returns it. `IdempotencyRaceTest` and
+`AbstractAllocationConcurrencyTest` force both requests past the lookup
+before either commits.
+
+`POST /api/checkout` and `POST /api/fulfilments` follow the same rule. In
+checkout the order is inserted before stock is reserved, so the duplicate
+fails before it reserves or charges anything; the request that lost may be
+answered `202` while the other is still in progress. The fulfilment hash
+covers its own request fields.
+
+> **Updated 2026-11-27.** When this record was written, the code took the row
+> lock (`SELECT ... FOR UPDATE`) on the inventory item first and looked the
+> key up after it. That changed when the locking strategy became switchable
+> ([#15](https://github.com/ChamaniNiroshani/order-allocation-engine/pull/15)):
+> `OPTIMISTIC` and `ATOMIC_UPDATE` take no lock before the lookup.
 
 Rows created before the `requestHash` column existed have no hash
 (`null`), and `matchesRequestHash` treats `null` as a match, so older

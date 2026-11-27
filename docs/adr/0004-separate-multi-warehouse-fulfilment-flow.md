@@ -10,9 +10,14 @@ Allocation strategies (nearest warehouse, first-expiry-first-out, split shipment
 quantity, and that model has no warehouse and no expiry.
 
 Those flows are the ones with evidence behind them: `POST /api/orders` has three switchable locking modes
-benchmarked in [docs/benchmarks.md](../benchmarks.md) (ADR-0003), and `POST /api/checkout` (saga, expiry job,
-refund on expiry) has been chaos-tested ([docs/chaos.md](../chaos.md)). Changing their tables would invalidate
-those numbers and those experiments.
+benchmarked in [docs/benchmarks.md](../benchmarks.md) (ADR-0003), and `POST /api/checkout` (saga and expiry job)
+has been chaos-tested ([docs/chaos.md](../chaos.md)). Changing their tables would invalidate those numbers and
+those experiments.
+
+> **Updated 2026-11-27.** This record used to list refund on expiry among the chaos-tested behaviour. It was not:
+> the expiry job did not refund when this was written. Refund on expiry was added later
+> ([#27](https://github.com/ChamaniNiroshani/order-allocation-engine/pull/27)), covered by integration tests, and has
+> not been part of a chaos run.
 
 ## Options considered
 
@@ -41,4 +46,4 @@ checkout saga, the benchmarks and the chaos tests are not changed.
 - The new flow does not use the saga (no payment step, no reservation expiry): `qty_reserved` exists in the
   schema but nothing sets it yet.
 - Demo data (Colombo, Kandy, Galle) is a repeatable Flyway migration in `db/seed`, loaded only by the `dev`
-  profile, so it can never reach a real database.
+  profile, so it is not loaded unless that profile is active.
